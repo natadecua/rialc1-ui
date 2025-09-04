@@ -1,0 +1,105 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [121.04370, 14.67600],
+          [121.04375, 14.67605],
+          [121.04380, 14.67600],
+          [121.04375, 14.67595],
+          [121.04370, 14.67600]
+        ]]
+      },
+      "properties": {
+        "tree_id": "T001",
+        "predicted_species": "Molave",
+        "ground_truth_species": "Molave",
+        "status": "Correct",
+        "potree_path": "./data/trees/tree_001/"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [121.04390, 14.67610],
+          [121.04395, 14.67615],
+          [121.04400, 14.67610],
+          [121.04395, 14.67605],
+          [121.04390, 14.67610]
+        ]]
+      },
+      "properties": {
+        "tree_id": "T002",
+        "predicted_species": "Narra",
+        "ground_truth_species": "Mahogany",
+        "status": "Incorrect",
+        "potree_path": "./data/trees/tree_002/"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [121.04350, 14.67580],
+          [121.04355, 14.67585],
+          [121.04360, 14.67580],
+          [121.04355, 14.67575],
+          [121.04350, 14.67580]
+        ]]
+      },
+      "properties": {
+        "tree_id": "T003",
+        "predicted_species": "Acacia",
+        "ground_truth_species": "Acacia",
+        "status": "Training",
+        "potree_path": "./data/trees/tree_003/"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [121.04420, 14.67640],
+          [121.04425, 14.67645],
+          [121.04430, 14.67640],
+          [121.04425, 14.67635],
+          [121.04420, 14.67640]
+        ]]
+      },
+      "properties": {
+        "tree_id": "T004",
+        "predicted_species": "Eucalyptus",
+        "ground_truth_species": "Eucalyptus",
+        "status": "Correct",
+        "potree_path": "./data/trees/tree_004/"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [121.04300, 14.67550],
+          [121.04305, 14.67555],
+          [121.04310, 14.67550],
+          [121.04305, 14.67545],
+          [121.04300, 14.67550]
+        ]]
+      },
+      "properties": {
+        "tree_id": "T005",
+        "predicted_species": "Ipil-ipil",
+        "ground_truth_species": "Narra",
+        "status": "Incorrect",
+        "potree_path": "./data/trees/tree_005/"
+      }
+    }
+  ]
+}

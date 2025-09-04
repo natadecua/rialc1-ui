@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>La Mesa Ecopark: LiDAR Tree Species Identification</title>
+    
+    <!-- Note: In production, use actual Leaflet and Potree from CDN or local files -->
+    <!-- For demonstration, we'll use a simplified map implementation -->
+    
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <h1>La Mesa Ecopark: LiDAR Tree Species Identification</h1>
+    </header>
+
+    <!-- Main Container -->
+    <div class="container">
+        <!-- Map Container -->
+        <div class="map-container">
+            <div id="map"></div>
+            
+            <!-- Map Controls -->
+            <div class="map-controls">
+                <!-- Legend -->
+                <div class="legend" id="legend">
+                    <h4>Tree Status</h4>
+                    <div class="legend-item">
+                        <span class="legend-color correct"></span>
+                        <span>Correct Prediction</span>
+                    </div>
+                    <div class="legend-item">
+                        <span class="legend-color incorrect"></span>
+                        <span>Incorrect Prediction</span>
+                    </div>
+                    <div class="legend-item">
+                        <span class="legend-color training"></span>
+                        <span>Training Data</span>
+                    </div>
+                </div>
+
+                <!-- Filter Controls -->
+                <div class="filter-controls" id="filterControls">
+                    <h4>Filter by Status</h4>
+                    <label>
+                        <input type="checkbox" id="filterCorrect" checked>
+                        <span>Correct</span>
+                    </label>
+                    <label>
+                        <input type="checkbox" id="filterIncorrect" checked>
+                        <span>Incorrect</span>
+                    </label>
+                    <label>
+                        <input type="checkbox" id="filterTraining" checked>
+                        <span>Training</span>
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        <!-- Side Panel -->
+        <div class="side-panel" id="sidePanel">
+            <button class="panel-toggle" id="panelToggle">
+                <span>☰</span>
+            </button>
+            
+            <div class="panel-content">
+                <!-- Model Performance Section -->
+                <section class="performance-section">
+                    <h3>Model Performance</h3>
+                    <div class="metrics-grid">
+                        <div class="metric">
+                            <span class="metric-label">Overall Accuracy</span>
+                            <span class="metric-value" id="accuracy">92.5%</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Precision</span>
+                            <span class="metric-value" id="precision">0.95</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Recall</span>
+                            <span class="metric-value" id="recall">0.94</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">F1-Score</span>
+                            <span class="metric-value" id="f1score">0.945</span>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Results Table Section -->
+                <section class="results-section">
+                    <h3>Results Table</h3>
+                    
+                    <!-- Search Bar -->
+                    <div class="search-container">
+                        <input type="text" id="searchInput" placeholder="Search by Tree ID or Species...">
+                    </div>
+                    
+                    <!-- Table -->
+                    <div class="table-container">
+                        <table id="resultsTable">
+                            <thead>
+                                <tr>
+                                    <th data-sort="tree_id">Tree ID</th>
+                                    <th data-sort="predicted_species">Predicted Species</th>
+                                    <th data-sort="ground_truth_species">Ground Truth</th>
+                                    <th data-sort="status">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tableBody">
+                                <!-- Data will be populated by JavaScript -->
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+        </div>
+    </div>
+
+    <!-- 3D Tree Viewer Modal -->
+    <div id="treeModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modalTitle">Tree Details</h2>
+                <span class="close" id="closeModal">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="tree-info" id="treeInfo">
+                    <!-- Tree information will be populated by JavaScript -->
+                </div>
+                <div class="potree-container" id="potreeContainer">
+                    <!-- Potree viewer will be initialized here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Indicator -->
+    <div id="loadingIndicator" class="loading">
+        <div class="spinner"></div>
+        <p>Loading tree data...</p>
+    </div>
+
+    <!-- Note: In production, use actual Leaflet and Potree from CDN or local files -->
+    <!-- For demonstration, we'll use a simplified map implementation -->
+    
+    <!-- Custom JavaScript -->
+    <script src="script.js"></script>
+</body>
+</html>
