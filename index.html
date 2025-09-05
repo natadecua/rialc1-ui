@@ -5,8 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>La Mesa Ecopark: LiDAR Tree Species Identification</title>
     
-    <!-- Note: In production, use actual Leaflet and Potree from CDN or local files -->
-    <!-- For demonstration, we'll use a simplified map implementation -->
+    <!-- External Libraries -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/las-js@0.1.0/dist/las-js.min.js"></script>
+    <script src="https://unpkg.com/shapefile@0.6.6/dist/shapefile.js"></script>
     
     <!-- Custom CSS -->
     <link rel="stylesheet" href="style.css">
@@ -115,6 +118,93 @@
                                 <!-- Data will be populated by JavaScript -->
                             </tbody>
                         </table>
+                    </div>
+                </section>
+
+                <!-- Data Loading Section -->
+                <section class="results-section">
+                    <h3>Data Loading</h3>
+                    <div id="dataLoadingStatus" style="margin-bottom: 15px;">
+                        <div style="display: flex; align-items: center; margin-bottom: 10px;">
+                            <div id="lasStatus" style="display: flex; align-items: center; margin-right: 20px;">
+                                <span id="lasIcon" style="margin-right: 8px;">⏳</span>
+                                <span>Loading LAS file...</span>
+                            </div>
+                            <div id="shapefileStatus" style="display: flex; align-items: center;">
+                                <span id="shapefileIcon" style="margin-right: 8px;">⏳</span>
+                                <span>Loading shapefiles...</span>
+                            </div>
+                        </div>
+                        <div id="dataStatus" style="font-size: 0.85rem; color: #666; margin-bottom: 10px;"></div>
+                    </div>
+                </section>
+
+                <!-- Data Import/Export Section -->
+                <section class="results-section">
+                    <h3>Data Management</h3>
+                    <div class="import-export" style="margin-bottom: 15px;">
+                        <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap;">
+                            <input type="file" id="importGeoJSONInput" accept="application/geo+json,application/json" style="display:none" />
+                            <button id="importGeoJSONBtn">Import GeoJSON</button>
+                            <input type="file" id="importLASInput" accept=".las,.laz" style="display:none" />
+                            <button id="importLASBtn">Import LAS/LAZ</button>
+                            <input type="file" id="importShapefileInput" accept=".shp,.dbf,.prj,.shx" multiple style="display:none" />
+                            <button id="importShapefileBtn">Import Shapefile</button>
+                        </div>
+                        <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap;">
+                            <button id="loadLocalLASBtn" style="background: #28a745; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer;">
+                                📁 Load Local LAS File
+                            </button>
+                            <button id="loadLocalShapefileBtn" style="background: #28a745; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer;">
+                                📁 Load Local Shapefiles
+                            </button>
+                        </div>
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <button id="exportCSVBtn">Export CSV</button>
+                            <button id="exportGeoJSONBtn">Export GeoJSON</button>
+                            <button id="reloadDataBtn">Reload Raw Data</button>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Evaluation Section -->
+                <section class="results-section">
+                    <h3>Evaluation Details</h3>
+                    <div id="confusionMatrix" class="cm-container" aria-label="Confusion Matrix"></div>
+                    <div id="perClassMetrics" class="pcm-container" aria-label="Per-class Metrics" style="margin-top:12px;"></div>
+                </section>
+
+                <!-- Model Card / About -->
+                <section class="results-section">
+                    <h3>About the Model</h3>
+                    <p style="font-size:0.9rem;color:#555">
+                        This UI visualizes a tree species identification model trained on LiDAR-derived features. It shows predictions vs. ground truth, training samples, and evaluation metrics. Replace the sample data by importing your own GeoJSON. The 3D modal simulates a point cloud view; integrate Potree for real data.
+                    </p>
+                </section>
+
+                <!-- Setup Instructions -->
+                <section class="results-section" id="setupInstructions" style="display: none;">
+                    <h3>Setup Instructions</h3>
+                    <div style="background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 6px; padding: 15px; margin-bottom: 15px;">
+                        <h4 style="color: #856404; margin-bottom: 10px;">🚨 CORS Error - Choose Your Solution</h4>
+                        <p style="color: #856404; margin-bottom: 15px;">
+                            To load your LAS and shapefile data, you have two options:
+                        </p>
+                        
+                        <div style="margin-bottom: 15px;">
+                            <h5 style="color: #856404; margin-bottom: 8px;">✅ Option 1 - Easy: Use Local File Buttons (Recommended)</h5>
+                            <p style="color: #856404; font-size: 0.9rem; margin-bottom: 8px;">
+                                Click the green "📁 Load Local LAS File" and "📁 Load Local Shapefiles" buttons above to load your files directly without a server.
+                            </p>
+                        </div>
+                        
+                        <div style="background: #f8f9fa; border-radius: 4px; padding: 10px; font-family: monospace; font-size: 0.9rem;">
+                            <div style="margin-bottom: 5px;"><strong>Option 2 - Local Server (PowerShell):</strong></div>
+                            <div style="color: #28a745;">cd "c:\Users\natha\rialc1-ui"</div>
+                            <div style="color: #28a745;">python -m http.server 8000</div>
+                            <div style="margin-top: 10px; margin-bottom: 5px;"><strong>Then visit:</strong></div>
+                            <div style="color: #007bff;">http://localhost:8000</div>
+                        </div>
                     </div>
                 </section>
             </div>

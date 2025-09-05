@@ -287,6 +287,49 @@ body {
     color: #212529;
 }
 
+/* Confusion Matrix */
+.cm-container {
+    overflow-x: auto;
+    margin-top: 10px;
+}
+
+.cm-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+}
+
+.cm-table th, .cm-table td {
+    border: 1px solid #dee2e6;
+    padding: 6px 8px;
+    text-align: center;
+}
+
+.cm-table th {
+    background: #f8f9fa;
+}
+
+.cm-table td.diag {
+    background: #e6f4ea;
+    font-weight: 600;
+}
+
+/* Per-class Metrics */
+.pcm-container table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+}
+
+.pcm-container th, .pcm-container td {
+    border: 1px solid #dee2e6;
+    padding: 6px 8px;
+}
+
+.pcm-container th {
+    background: #f8f9fa;
+}
+
 /* Modal Styles */
 .modal {
     display: none;
