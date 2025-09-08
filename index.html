@@ -8,9 +8,22 @@
     <!-- External Libraries -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- LAS parsing (kept for backward compatibility, but enhanced logic is in script.js) -->
     <script src="https://unpkg.com/las-js@0.1.0/dist/las-js.min.js"></script>
     <script src="https://unpkg.com/shapefile@0.6.6/dist/shapefile.js"></script>
-    
+
+    <!-- GeoTIFF/GeoRaster for raster visualization -->
+    <script src="https://unpkg.com/geotiff@2.1.2/dist-browser/geotiff.min.js"></script>
+    <script src="https://unpkg.com/georaster@1.6.1/dist/georaster.browser.min.js"></script>
+    <script src="https://unpkg.com/georaster-layer-for-leaflet@3.9.0/dist/georaster-layer-for-leaflet.min.js"></script>
+
+    <!-- WebGL point rendering and heatmap for dense point clouds -->
+    <script src="https://unpkg.com/leaflet.glify@3.2.0/dist/leaflet-glify.min.js"></script>
+    <script src="https://unpkg.com/leaflet.heat/dist/leaflet-heat.js"></script>
+
+    <!-- CRS utilities (optional, for projected data) -->
+    <script src="https://cdn.jsdelivr.net/npm/proj4@2.9.0/dist/proj4.js"></script>
+
     <!-- Custom CSS -->
     <link rel="stylesheet" href="style.css">
 </head>
@@ -125,14 +138,18 @@
                 <section class="results-section">
                     <h3>Data Loading</h3>
                     <div id="dataLoadingStatus" style="margin-bottom: 15px;">
-                        <div style="display: flex; align-items: center; margin-bottom: 10px;">
-                            <div id="lasStatus" style="display: flex; align-items: center; margin-right: 20px;">
+                        <div style="display: flex; align-items: center; margin-bottom: 10px; gap: 20px; flex-wrap: wrap;">
+                            <div id="lasStatus" style="display: flex; align-items: center;">
                                 <span id="lasIcon" style="margin-right: 8px;">⏳</span>
                                 <span>Loading LAS file...</span>
                             </div>
                             <div id="shapefileStatus" style="display: flex; align-items: center;">
                                 <span id="shapefileIcon" style="margin-right: 8px;">⏳</span>
                                 <span>Loading shapefiles...</span>
+                            </div>
+                            <div id="rasterStatus" style="display: flex; align-items: center;">
+                                <span id="rasterIcon" style="margin-right: 8px;">⏳</span>
+                                <span>Loading GeoTIFF (DSM/CHM)...</span>
                             </div>
                         </div>
                         <div id="dataStatus" style="font-size: 0.85rem; color: #666; margin-bottom: 10px;"></div>
@@ -150,6 +167,8 @@
                             <button id="importLASBtn">Import LAS/LAZ</button>
                             <input type="file" id="importShapefileInput" accept=".shp,.dbf,.prj,.shx" multiple style="display:none" />
                             <button id="importShapefileBtn">Import Shapefile</button>
+                            <input type="file" id="importGeoTIFFInput" accept=".tif,.tiff" style="display:none" />
+                            <button id="importGeoTIFFBtn">Import GeoTIFF (DSM/CHM)</button>
                         </div>
                         <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap;">
                             <button id="loadLocalLASBtn" style="background: #28a745; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer;">
@@ -158,11 +177,56 @@
                             <button id="loadLocalShapefileBtn" style="background: #28a745; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer;">
                                 📁 Load Local Shapefiles
                             </button>
+                            <button id="loadLocalGeoTIFFBtn" style="background: #28a745; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer;">
+                                🗺️ Load Local GeoTIFF
+                            </button>
+                        </div>
+                        <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap;">
+                            <button id="performSegmentationBtn" style="background: #17a2b8; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer;">
+                                🌳 Perform Tree Segmentation
+                            </button>
+                            <button id="clearPointCloudBtn" style="background: #dc3545; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer;">
+                                🗑️ Clear Point Cloud
+                            </button>
                         </div>
                         <div style="display: flex; gap: 10px; align-items: center;">
                             <button id="exportCSVBtn">Export CSV</button>
                             <button id="exportGeoJSONBtn">Export GeoJSON</button>
                             <button id="reloadDataBtn">Reload Raw Data</button>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- LiDAR Analysis Section -->
+                <section class="results-section">
+                    <h3>LiDAR Analysis</h3>
+                    <div id="lidarStats" style="background: #f8f9fa; padding: 15px; border-radius: 6px; margin-bottom: 15px;">
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 0.85rem;">
+                            <div><strong>Total Points:</strong> <span id="totalPointsCount">-</span></div>
+                            <div><strong>Ground Points:</strong> <span id="groundPointsCount">-</span></div>
+                            <div><strong>Vegetation Points:</strong> <span id="vegetationPointsCount">-</span></div>
+                            <div><strong>Building Points:</strong> <span id="buildingPointsCount">-</span></div>
+                        </div>
+                        <div style="margin-top: 10px; font-size: 0.85rem;">
+                            <strong>Height Range:</strong> <span id="heightRange">-</span>
+                        </div>
+                    </div>
+                    
+                    <!-- Segmentation Parameters -->
+                    <div id="segmentationParams" style="background: #e7f3ff; padding: 15px; border-radius: 6px; border-left: 4px solid #007bff;">
+                        <h4 style="margin: 0 0 10px 0; font-size: 1rem; color: #007bff;">Segmentation Parameters</h4>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 10px;">
+                            <div>
+                                <label style="display: block; font-size: 0.85rem; margin-bottom: 5px; font-weight: 500;">Search Radius (m):</label>
+                                <input type="number" id="segmentationEps" value="5.0" min="1" max="20" step="0.5" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 0.85rem;">
+                            </div>
+                            <div>
+                                <label style="display: block; font-size: 0.85rem; margin-bottom: 5px; font-weight: 500;">Min Points:</label>
+                                <input type="number" id="segmentationMinPts" value="50" min="10" max="200" step="10" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 0.85rem;">
+                            </div>
+                        </div>
+                        <div style="font-size: 0.8rem; color: #666; margin-bottom: 10px;">
+                            <strong>Tip:</strong> Larger search radius finds bigger trees. More min points reduces noise but may miss small trees.
                         </div>
                     </div>
                 </section>
@@ -194,13 +258,13 @@
                         <div style="margin-bottom: 15px;">
                             <h5 style="color: #856404; margin-bottom: 8px;">✅ Option 1 - Easy: Use Local File Buttons (Recommended)</h5>
                             <p style="color: #856404; font-size: 0.9rem; margin-bottom: 8px;">
-                                Click the green "📁 Load Local LAS File" and "📁 Load Local Shapefiles" buttons above to load your files directly without a server.
+                                Click the green "📁 Load Local LAS File", "📁 Load Local Shapefiles", or "🗺️ Load Local GeoTIFF" buttons above to load your files directly without a server.
                             </p>
                         </div>
                         
                         <div style="background: #f8f9fa; border-radius: 4px; padding: 10px; font-family: monospace; font-size: 0.9rem;">
                             <div style="margin-bottom: 5px;"><strong>Option 2 - Local Server (PowerShell):</strong></div>
-                            <div style="color: #28a745;">cd "c:\Users\natha\rialc1-ui"</div>
+                            <div style="color: #28a745;">cd "c:\\Users\\natha\\rialc1-ui"</div>
                             <div style="color: #28a745;">python -m http.server 8000</div>
                             <div style="margin-top: 10px; margin-bottom: 5px;"><strong>Then visit:</strong></div>
                             <div style="color: #007bff;">http://localhost:8000</div>
@@ -235,9 +299,6 @@
         <p>Loading tree data...</p>
     </div>
 
-    <!-- Note: In production, use actual Leaflet and Potree from CDN or local files -->
-    <!-- For demonstration, we'll use a simplified map implementation -->
-    
     <!-- Custom JavaScript -->
     <script src="script.js"></script>
 </body>

@@ -101,7 +101,7 @@ async function loadRawData() {
 }
 
 /**
- * Load LAS file from raw_data folder
+ * Load LAS file from raw_data folder with enhanced visualization
  */
 async function loadLASFile() {
     try {
@@ -118,6 +118,7 @@ async function loadLASFile() {
         for (const path of possiblePaths) {
             try {
                 console.log(`Trying to load LAS file from: ${path}`);
+                updateLASStatus('⏳', `Loading from ${path}...`);
                 response = await fetch(path);
                 if (response.ok) {
                     console.log(`Successfully loaded LAS file from: ${path}`);
@@ -134,6 +135,7 @@ async function loadLASFile() {
         }
         
         const arrayBuffer = await response.arrayBuffer();
+        updateLASStatus('⏳', 'Parsing LAS file...');
         
         // Check if LAS.js is available
         if (typeof LASFile === 'undefined') {
@@ -143,9 +145,25 @@ async function loadLASFile() {
         // Parse LAS file using LAS.js
         const lasFile = new LASFile(arrayBuffer);
         
-        // Extract point cloud data
-        const points = lasFile.points;
+        // Extract point cloud data with enhanced properties
+        const points = [];
         const header = lasFile.header;
+        
+        // Process points with classification and intensity
+        for (let i = 0; i < lasFile.pointsCount; i++) {
+            const point = lasFile.getPoint(i);
+            if (point) {
+                points.push({
+                    x: point.x,
+                    y: point.y,
+                    z: point.z,
+                    intensity: point.intensity || 0,
+                    classification: point.classification || 0,
+                    returnNumber: point.returnNumber || 1,
+                    numberOfReturns: point.numberOfReturns || 1
+                });
+            }
+        }
         
         pointCloudData = {
             points: points,
@@ -157,17 +175,27 @@ async function loadLASFile() {
                 maxY: header.maxY,
                 minZ: header.minZ,
                 maxZ: header.maxZ
+            },
+            statistics: {
+                totalPoints: points.length,
+                groundPoints: points.filter(p => p.classification === 2).length,
+                vegetationPoints: points.filter(p => p.classification >= 3 && p.classification <= 5).length,
+                buildingPoints: points.filter(p => p.classification === 6).length
             }
         };
         
-        // Add point cloud visualization to map
-        visualizePointCloud();
+        // Enhanced point cloud visualization
+        visualizePointCloudEnhanced();
         
+        updateLASStatus('✅', `LAS file loaded: ${points.length.toLocaleString()} points`);
         console.log(`LAS file loaded: ${points.length} points`);
+        console.log('Point statistics:', pointCloudData.statistics);
+        
         return pointCloudData;
         
     } catch (error) {
         console.error('Error loading LAS file:', error);
+        updateLASStatus('❌', `Failed: ${error.message}`);
         throw error;
     }
 }
@@ -798,6 +826,24 @@ function setupEventListeners() {
         });
     }
 
+    // Segmentation and point cloud control buttons
+    const performSegmentationBtn = document.getElementById('performSegmentationBtn');
+    const clearPointCloudBtn = document.getElementById('clearPointCloudBtn');
+    
+    if (performSegmentationBtn) {
+        performSegmentationBtn.addEventListener('click', () => {
+            const eps = parseFloat(document.getElementById('segmentationEps').value) || 5.0;
+            const minPts = parseInt(document.getElementById('segmentationMinPts').value) || 50;
+            performTreeSegmentationWithParams(eps, minPts);
+        });
+    }
+    
+    if (clearPointCloudBtn) {
+        clearPointCloudBtn.addEventListener('click', () => {
+            clearPointCloudVisualization();
+        });
+    }
+
     // Keyboard shortcuts
     document.addEventListener('keydown', function(e) {
         if (e.key === 'Escape') {
@@ -1400,9 +1446,547 @@ async function loadShapefilesFromInput(files) {
     }
 }
 
-// Error handling
-window.addEventListener('error', function(e) {
-    console.error('Application error:', e.error);
-});
+/**
+ * Enhanced point cloud visualization with classification and segmentation
+ */
+function visualizePointCloudEnhanced() {
+    if (!pointCloudData) return;
+    
+    // Clear existing point cloud markers
+    if (pointCloudData.markers) {
+        pointCloudData.markers.forEach(marker => map.removeLayer(marker));
+    }
+    
+    // Create layer groups for different point classifications
+    const groundLayer = L.layerGroup();
+    const vegetationLayer = L.layerGroup();
+    const buildingLayer = L.layerGroup();
+    const unclassifiedLayer = L.layerGroup();
+    
+    // Sample points for performance (max 15000 points)
+    const sampleSize = Math.min(15000, pointCloudData.points.length);
+    const step = Math.floor(pointCloudData.points.length / sampleSize);
+    
+    const pointMarkers = [];
+    
+    updateLASStatus('⏳', 'Visualizing point cloud...');
+    
+    for (let i = 0; i < pointCloudData.points.length; i += step) {
+        const point = pointCloudData.points[i];
+        
+        // Determine color based on classification and height
+        let color, layer;
+        const classification = point.classification || 0;
+        
+        switch (classification) {
+            case 2: // Ground
+                color = '#8B4513'; // Brown
+                layer = groundLayer;
+                break;
+            case 3: // Low vegetation
+            case 4: // Medium vegetation  
+            case 5: // High vegetation
+                color = getVegetationColor(point.z, pointCloudData.bounds.minZ, pointCloudData.bounds.maxZ);
+                layer = vegetationLayer;
+                break;
+            case 6: // Building
+                color = '#FF4500'; // Orange red
+                layer = buildingLayer;
+                break;
+            default: // Unclassified
+                color = getHeightColor(point.z, pointCloudData.bounds.minZ, pointCloudData.bounds.maxZ);
+                layer = unclassifiedLayer;
+        }
+        
+        const marker = L.circleMarker([point.y, point.x], {
+            radius: classification >= 3 && classification <= 5 ? 1.5 : 1, // Vegetation points slightly larger
+            color: color,
+            fillColor: color,
+            fillOpacity: 0.7,
+            stroke: false
+        });
+        
+        // Add popup with point information
+        marker.bindPopup(`
+            <div style="font-size: 0.85rem;">
+                <strong>Point Information</strong><br>
+                <strong>Height:</strong> ${point.z.toFixed(2)}m<br>
+                <strong>Classification:</strong> ${getClassificationName(classification)}<br>
+                <strong>Intensity:</strong> ${point.intensity}<br>
+                <strong>Returns:</strong> ${point.returnNumber}/${point.numberOfReturns}
+            </div>
+        `);
+        
+        layer.addLayer(marker);
+        pointMarkers.push(marker);
+    }
+    
+    // Add layers to map
+    groundLayer.addTo(map);
+    vegetationLayer.addTo(map);
+    buildingLayer.addTo(map);
+    unclassifiedLayer.addTo(map);
+    
+    // Create layer control for point cloud
+    const pointCloudLayers = {
+        "Ground Points": groundLayer,
+        "Vegetation Points": vegetationLayer,
+        "Building Points": buildingLayer,
+        "Unclassified Points": unclassifiedLayer
+    };
+    
+    // Add to existing layer control
+    const layerControl = L.control.layers(null, pointCloudLayers);
+    layerControl.addTo(map);
+    
+    // Store markers and layers for cleanup
+    pointCloudData.markers = pointMarkers;
+    pointCloudData.layers = {
+        ground: groundLayer,
+        vegetation: vegetationLayer,
+        building: buildingLayer,
+        unclassified: unclassifiedLayer
+    };
+    
+    updateLASStatus('✅', `Point cloud visualized: ${pointMarkers.length.toLocaleString()} points`);
+    console.log('Enhanced point cloud visualization completed');
+}
+
+/**
+ * Get vegetation color based on height (green gradient)
+ */
+function getVegetationColor(z, minZ, maxZ) {
+    const normalized = (z - minZ) / (maxZ - minZ);
+    if (normalized < 0.3) return '#90EE90'; // Light green for low vegetation
+    if (normalized < 0.7) return '#32CD32'; // Lime green for medium vegetation
+    return '#006400'; // Dark green for high vegetation
+}
+
+/**
+ * Get classification name from code
+ */
+function getClassificationName(classification) {
+    const names = {
+        0: 'Never classified',
+        1: 'Unclassified',
+        2: 'Ground',
+        3: 'Low Vegetation',
+        4: 'Medium Vegetation',
+        5: 'High Vegetation',
+        6: 'Building',
+        7: 'Low Point',
+        8: 'Reserved',
+        9: 'Water',
+        10: 'Rail',
+        11: 'Road Surface',
+        12: 'Reserved'
+    };
+    return names[classification] || `Class ${classification}`;
+}
+
+/**
+ * Perform tree segmentation on point cloud data
+ */
+function performTreeSegmentation() {
+    if (!pointCloudData || !pointCloudData.points.length) {
+        alert('No point cloud data available for segmentation');
+        return;
+    }
+    
+    updateDataStatus('Performing tree segmentation...');
+    
+    // Filter vegetation points (classifications 3, 4, 5)
+    const vegetationPoints = pointCloudData.points.filter(point => 
+        point.classification >= 3 && point.classification <= 5
+    );
+    
+    if (vegetationPoints.length === 0) {
+        alert('No vegetation points found for segmentation');
+        updateDataStatus('No vegetation points found');
+        return;
+    }
+    
+    // Perform clustering-based segmentation
+    const segments = performDBSCANClustering(vegetationPoints);
+    
+    // Convert segments to tree crown polygons
+    const treeCrowns = segments.map((segment, index) => {
+        const crownPolygon = createTreeCrownPolygon(segment);
+        const treeHeight = Math.max(...segment.map(p => p.z)) - Math.min(...segment.map(p => p.z));
+        const avgIntensity = segment.reduce((sum, p) => sum + p.intensity, 0) / segment.length;
+        
+        // Predict species based on height and intensity (simplified)
+        const predictedSpecies = predictSpeciesFromFeatures(treeHeight, avgIntensity, segment.length);
+        
+        return {
+            type: "Feature",
+            geometry: {
+                type: "Polygon",
+                coordinates: [crownPolygon]
+            },
+            properties: {
+                tree_id: `SEG_${(index + 1).toString().padStart(3, '0')}`,
+                predicted_species: predictedSpecies,
+                ground_truth_species: predictedSpecies, // In real scenario, this would come from field data
+                status: 'Segmented',
+                height: treeHeight.toFixed(2),
+                point_count: segment.length,
+                avg_intensity: avgIntensity.toFixed(1),
+                potree_path: `./data/segmented/tree_${index + 1}/`
+            }
+        };
+    });
+    
+    // Add segmented trees to the data
+    const segmentedData = {
+        type: "FeatureCollection",
+        features: treeCrowns
+    };
+    
+    // Process and display segmented trees
+    processTreeData(segmentedData);
+    
+    updateDataStatus(`Tree segmentation completed: ${treeCrowns.length} trees found`);
+    console.log(`Segmentation completed: ${treeCrowns.length} tree segments`);
+}
+
+/**
+ * DBSCAN clustering algorithm for tree segmentation
+ */
+function performDBSCANClustering(points, eps = 5.0, minPts = 50) {
+    const clusters = [];
+    const visited = new Set();
+    const clustered = new Set();
+    
+    points.forEach((point, index) => {
+        if (visited.has(index)) return;
+        
+        visited.add(index);
+        const neighbors = regionQuery(points, index, eps);
+        
+        if (neighbors.length < minPts) {
+            // Mark as noise
+            return;
+        }
+        
+        // Create new cluster
+        const cluster = [];
+        expandCluster(points, index, neighbors, cluster, eps, minPts, visited, clustered);
+        
+        if (cluster.length >= minPts) {
+            clusters.push(cluster);
+        }
+    });
+    
+    return clusters.filter(cluster => cluster.length >= 100); // Filter small clusters
+}
+
+/**
+ * Find neighbors within epsilon distance
+ */
+function regionQuery(points, pointIndex, eps) {
+    const neighbors = [];
+    const point = points[pointIndex];
+    
+    points.forEach((otherPoint, index) => {
+        if (index === pointIndex) return;
+        
+        const distance = Math.sqrt(
+            Math.pow(point.x - otherPoint.x, 2) + 
+            Math.pow(point.y - otherPoint.y, 2) +
+            Math.pow((point.z - otherPoint.z) * 0.1, 2) // Weight Z less for vegetation
+        );
+        
+        if (distance <= eps) {
+            neighbors.push(index);
+        }
+    });
+    
+    return neighbors;
+}
+
+/**
+ * Expand cluster using DBSCAN algorithm
+ */
+function expandCluster(points, pointIndex, neighbors, cluster, eps, minPts, visited, clustered) {
+    cluster.push(points[pointIndex]);
+    clustered.add(pointIndex);
+    
+    for (let i = 0; i < neighbors.length; i++) {
+        const neighborIndex = neighbors[i];
+        
+        if (!visited.has(neighborIndex)) {
+            visited.add(neighborIndex);
+            const neighborNeighbors = regionQuery(points, neighborIndex, eps);
+            
+            if (neighborNeighbors.length >= minPts) {
+                neighbors.push(...neighborNeighbors);
+            }
+        }
+        
+        if (!clustered.has(neighborIndex)) {
+            cluster.push(points[neighborIndex]);
+            clustered.add(neighborIndex);
+        }
+    }
+}
+
+/**
+ * Create tree crown polygon from point cluster
+ */
+function createTreeCrownPolygon(points) {
+    if (points.length === 0) return [];
+    
+    // Find convex hull of points (simplified)
+    const hull = convexHull(points.map(p => [p.x, p.y]));
+    
+    // Smooth the polygon by adding intermediate points
+    const smoothedHull = smoothPolygon(hull);
+    
+    return smoothedHull;
+}
+
+/**
+ * Convex hull algorithm (Graham scan)
+ */
+function convexHull(points) {
+    if (points.length < 3) return points;
+    
+    // Find the bottom-most point
+    let bottom = 0;
+    for (let i = 1; i < points.length; i++) {
+        if (points[i][1] < points[bottom][1] || 
+            (points[i][1] === points[bottom][1] && points[i][0] < points[bottom][0])) {
+            bottom = i;
+        }
+    }
+    
+    // Swap bottom point to first position
+    [points[0], points[bottom]] = [points[bottom], points[0]];
+    
+    // Sort points by polar angle with respect to bottom point
+    const bottomPoint = points[0];
+    points.slice(1).sort((a, b) => {
+        const angleA = Math.atan2(a[1] - bottomPoint[1], a[0] - bottomPoint[0]);
+        const angleB = Math.atan2(b[1] - bottomPoint[1], b[0] - bottomPoint[0]);
+        return angleA - angleB;
+    });
+    
+    // Graham scan
+    const hull = [points[0], points[1]];
+    
+    for (let i = 2; i < points.length; i++) {
+        while (hull.length > 1 && 
+               crossProduct(hull[hull.length - 2], hull[hull.length - 1], points[i]) <= 0) {
+            hull.pop();
+        }
+        hull.push(points[i]);
+    }
+    
+    // Close the polygon
+    hull.push(hull[0]);
+    
+    return hull;
+}
+
+/**
+ * Cross product for convex hull calculation
+ */
+function crossProduct(o, a, b) {
+    return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+}
+
+/**
+ * Smooth polygon by adding intermediate points
+ */
+function smoothPolygon(polygon) {
+    if (polygon.length < 4) return polygon;
+    
+    const smoothed = [];
+    for (let i = 0; i < polygon.length - 1; i++) {
+        const current = polygon[i];
+        const next = polygon[i + 1];
+        
+        smoothed.push(current);
+        
+        // Add intermediate point
+        const midX = (current[0] + next[0]) / 2;
+        const midY = (current[1] + next[1]) / 2;
+        smoothed.push([midX, midY]);
+    }
+    
+    return smoothed;
+}
+
+/**
+ * Predict species from LiDAR-derived features
+ */
+function predictSpeciesFromFeatures(height, avgIntensity, pointCount) {
+    // Simplified species prediction based on tree characteristics
+    // In a real implementation, this would use your trained ML model
+    
+    if (height > 20 && avgIntensity > 100) {
+        return 'Mahogany'; // Tall, high intensity
+    } else if (height > 15 && pointCount > 1000) {
+        return 'Narra'; // Medium tall, dense canopy
+    } else if (height > 10 && avgIntensity < 80) {
+        return 'Acacia'; // Medium height, lower intensity
+    } else if (height > 8) {
+        return 'Eucalyptus'; // Medium height
+    } else if (pointCount > 500) {
+        return 'Ipil-ipil'; // Dense low canopy
+    } else {
+        return 'Molave'; // Default for smaller trees
+    }
+}
+
+/**
+ * Perform tree segmentation with custom parameters
+ */
+function performTreeSegmentationWithParams(eps, minPts) {
+    if (!pointCloudData || !pointCloudData.points.length) {
+        alert('No point cloud data available for segmentation');
+        return;
+    }
+    
+    updateDataStatus(`Performing tree segmentation (eps=${eps}, minPts=${minPts})...`);
+    
+    // Filter vegetation points (classifications 3, 4, 5)
+    const vegetationPoints = pointCloudData.points.filter(point => 
+        point.classification >= 3 && point.classification <= 5
+    );
+    
+    if (vegetationPoints.length === 0) {
+        alert('No vegetation points found for segmentation');
+        updateDataStatus('No vegetation points found');
+        return;
+    }
+    
+    // Perform clustering-based segmentation with custom parameters
+    const segments = performDBSCANClustering(vegetationPoints, eps, minPts);
+    
+    if (segments.length === 0) {
+        alert('No tree segments found. Try adjusting the parameters.');
+        updateDataStatus('No tree segments found');
+        return;
+    }
+    
+    // Convert segments to tree crown polygons
+    const treeCrowns = segments.map((segment, index) => {
+        const crownPolygon = createTreeCrownPolygon(segment);
+        const treeHeight = Math.max(...segment.map(p => p.z)) - Math.min(...segment.map(p => p.z));
+        const avgIntensity = segment.reduce((sum, p) => sum + p.intensity, 0) / segment.length;
+        const crownArea = calculatePolygonArea(crownPolygon);
+        
+        // Predict species based on height and intensity (simplified)
+        const predictedSpecies = predictSpeciesFromFeatures(treeHeight, avgIntensity, segment.length);
+        
+        return {
+            type: "Feature",
+            geometry: {
+                type: "Polygon",
+                coordinates: [crownPolygon]
+            },
+            properties: {
+                tree_id: `SEG_${(index + 1).toString().padStart(3, '0')}`,
+                predicted_species: predictedSpecies,
+                ground_truth_species: predictedSpecies, // In real scenario, this would come from field data
+                status: 'Segmented',
+                height: treeHeight.toFixed(2),
+                point_count: segment.length,
+                avg_intensity: avgIntensity.toFixed(1),
+                crown_area: crownArea.toFixed(2),
+                potree_path: `./data/segmented/tree_${index + 1}/`
+            }
+        };
+    });
+    
+    // Add segmented trees to the data
+    const segmentedData = {
+        type: "FeatureCollection",
+        features: treeCrowns
+    };
+    
+    // Process and display segmented trees
+    processTreeData(segmentedData);
+    
+    updateDataStatus(`Tree segmentation completed: ${treeCrowns.length} trees found`);
+    updateLidarStatistics();
+    console.log(`Segmentation completed: ${treeCrowns.length} tree segments`);
+}
+
+/**
+ * Clear point cloud visualization from map
+ */
+function clearPointCloudVisualization() {
+    if (!pointCloudData) {
+        alert('No point cloud data to clear');
+        return;
+    }
+    
+    // Remove all point cloud markers
+    if (pointCloudData.markers) {
+        pointCloudData.markers.forEach(marker => map.removeLayer(marker));
+        pointCloudData.markers = [];
+    }
+    
+    // Remove layer groups
+    if (pointCloudData.layers) {
+        Object.values(pointCloudData.layers).forEach(layer => {
+            map.removeLayer(layer);
+        });
+        pointCloudData.layers = {};
+    }
+    
+    updateLASStatus('🗑️', 'Point cloud visualization cleared');
+    updateDataStatus('Point cloud visualization removed from map');
+    console.log('Point cloud visualization cleared');
+}
+
+/**
+ * Calculate polygon area using shoelace formula
+ */
+function calculatePolygonArea(coordinates) {
+    if (coordinates.length < 3) return 0;
+    
+    let area = 0;
+    const n = coordinates.length;
+    
+    for (let i = 0; i < n; i++) {
+        const j = (i + 1) % n;
+        area += coordinates[i][0] * coordinates[j][1];
+        area -= coordinates[j][0] * coordinates[i][1];
+    }
+    
+    return Math.abs(area) / 2;
+}
+
+/**
+ * Update LiDAR statistics display
+ */
+function updateLidarStatistics() {
+    if (!pointCloudData) {
+        // Clear statistics if no data
+        document.getElementById('totalPointsCount').textContent = '-';
+        document.getElementById('groundPointsCount').textContent = '-';
+        document.getElementById('vegetationPointsCount').textContent = '-';
+        document.getElementById('buildingPointsCount').textContent = '-';
+        document.getElementById('heightRange').textContent = '-';
+        return;
+    }
+    
+    const stats = pointCloudData.statistics;
+    const bounds = pointCloudData.bounds;
+    
+    // Update point counts
+    document.getElementById('totalPointsCount').textContent = stats.totalPoints.toLocaleString();
+    document.getElementById('groundPointsCount').textContent = stats.groundPoints.toLocaleString();
+    document.getElementById('vegetationPointsCount').textContent = stats.vegetationPoints.toLocaleString();
+    document.getElementById('buildingPointsCount').textContent = stats.buildingPoints.toLocaleString();
+    
+    // Update height range
+    const heightRange = `${bounds.minZ.toFixed(1)}m - ${bounds.maxZ.toFixed(1)}m`;
+    document.getElementById('heightRange').textContent = heightRange;
+}
 
 console.log('LiDAR Tree Species Identification UI initialized successfully');
