@@ -7,6 +7,12 @@ let currentSortDirection = 'asc';
 let map;
 let pointCloudData = null;
 let treePolygons = [];
+// New: overlay references and controls
+let layerControl = null;
+let glPointLayer = null;
+let heatLayer = null;
+let rasterLayer = null;
+let lasLoaderInstance = null;
 
 // Color mapping for tree status
 const statusColors = {
@@ -16,11 +22,32 @@ const statusColors = {
 };
 
 // Initialize the application when DOM is loaded
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', async function() {
+    await initializeLasWasm();
     initializeMap();
     loadRawData();
     setupEventListeners();
 });
+
+async function initializeLasWasm() {
+    let attempts = 0;
+    while (!window.lasWasm && attempts < 50) { // Wait up to 5 seconds
+        await new Promise(resolve => setTimeout(resolve, 100));
+        attempts++;
+    }
+
+    if (window.lasWasm) {
+        try {
+            const { LASLoader } = await window.lasWasm();
+            lasLoaderInstance = LASLoader;
+            console.log('las-wasm initialized successfully');
+        } catch (err) {
+            console.error('Failed to initialize las-wasm', err);
+        }
+    } else {
+        console.error('las-wasm script not loaded after waiting!');
+    }
+}
 
 /**
  * Initialize Leaflet map
@@ -29,25 +56,21 @@ function initializeMap() {
     // Initialize map centered on La Mesa Ecopark
     map = L.map('map').setView([14.6760, 121.0437], 16);
     
-    // Add OpenStreetMap tiles
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    // Base layers
+    const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '© OpenStreetMap contributors'
     }).addTo(map);
-    
-    // Add satellite imagery option
     const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
         attribution: '© Esri'
     });
-    
-    // Layer control
+
     const baseMaps = {
-        "OpenStreetMap": L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '© OpenStreetMap contributors'
-        }),
-        "Satellite": satelliteLayer
+        'OpenStreetMap': osm,
+        'Satellite': satelliteLayer
     };
-    
-    L.control.layers(baseMaps).addTo(map);
+
+    // Single layer control instance
+    layerControl = L.control.layers(baseMaps, {}).addTo(map);
     
     console.log('Leaflet map initialized successfully');
 }
@@ -68,6 +91,8 @@ async function loadRawData() {
         // Process results
         if (lasResult.status === 'fulfilled') {
             updateLASStatus('✅', 'LAS file loaded successfully');
+            updateLidarStatistics();
+            tryAdd2DViewFromPointCloud();
         } else {
             updateLASStatus('❌', 'Failed to load LAS file');
             console.error('LAS loading error:', lasResult.reason);
@@ -82,13 +107,13 @@ async function loadRawData() {
             updateShapefileStatus('❌', 'Failed to load shapefiles');
             console.error('Shapefile loading error:', shapefileResult.reason);
             // Fallback to sample data
-            createSampleData();
+            // createSampleData();
         }
         
         // Show helpful error message if both failed
         if (lasResult.status === 'rejected' && shapefileResult.status === 'rejected') {
             updateDataStatus('❌ CORS Error: Please run a local server. See instructions below.');
-            showSetupInstructions();
+            // showSetupInstructions();
         } else {
             updateDataStatus('Raw data loading completed');
         }
@@ -104,6 +129,9 @@ async function loadRawData() {
  * Load LAS file from raw_data folder with enhanced visualization
  */
 async function loadLASFile() {
+    if (!lasLoaderInstance) {
+        throw new Error('las-wasm is not initialized.');
+    }
     try {
         // Try multiple possible paths
         const possiblePaths = [
@@ -137,58 +165,41 @@ async function loadLASFile() {
         const arrayBuffer = await response.arrayBuffer();
         updateLASStatus('⏳', 'Parsing LAS file...');
         
-        // Check if LAS.js is available
-        if (typeof LASFile === 'undefined') {
-            throw new Error('LAS.js library not loaded. Please check the CDN link in index.html');
-        }
-        
-        // Parse LAS file using LAS.js
-        const lasFile = new LASFile(arrayBuffer);
-        
-        // Extract point cloud data with enhanced properties
-        const points = [];
-        const header = lasFile.header;
-        
-        // Process points with classification and intensity
-        for (let i = 0; i < lasFile.pointsCount; i++) {
-            const point = lasFile.getPoint(i);
-            if (point) {
-                points.push({
-                    x: point.x,
-                    y: point.y,
-                    z: point.z,
-                    intensity: point.intensity || 0,
-                    classification: point.classification || 0,
-                    returnNumber: point.returnNumber || 1,
-                    numberOfReturns: point.numberOfReturns || 1
-                });
-            }
-        }
+        const lasFile = await lasLoaderInstance.load(arrayBuffer);
+        const points = await lasLoaderInstance.getPoints(lasFile, 0, lasFile.pointsCount);
         
         pointCloudData = {
-            points: points,
-            header: header,
+            points: points.map(p => ({
+                x: p.x,
+                y: p.y,
+                z: p.z,
+                intensity: p.intensity || 0,
+                classification: p.classification || 0,
+                returnNumber: p.returnNumber || 1,
+                numberOfReturns: p.numberOfReturns || 1
+            })),
+            header: lasFile.header,
             bounds: {
-                minX: header.minX,
-                maxX: header.maxX,
-                minY: header.minY,
-                maxY: header.maxY,
-                minZ: header.minZ,
-                maxZ: header.maxZ
+                minX: lasFile.header.minX,
+                maxX: lasFile.header.maxX,
+                minY: lasFile.header.minY,
+                maxY: lasFile.header.maxY,
+                minZ: lasFile.header.minZ,
+                maxZ: lasFile.header.maxZ
             },
             statistics: {
-                totalPoints: points.length,
+                totalPoints: lasFile.pointsCount,
                 groundPoints: points.filter(p => p.classification === 2).length,
                 vegetationPoints: points.filter(p => p.classification >= 3 && p.classification <= 5).length,
                 buildingPoints: points.filter(p => p.classification === 6).length
             }
         };
         
-        // Enhanced point cloud visualization
-        visualizePointCloudEnhanced();
+        // Prefer efficient WebGL/heatmap visualization in 2D
+        tryAdd2DViewFromPointCloud();
         
-        updateLASStatus('✅', `LAS file loaded: ${points.length.toLocaleString()} points`);
-        console.log(`LAS file loaded: ${points.length} points`);
+        updateLASStatus('✅', `LAS file loaded: ${lasFile.pointsCount.toLocaleString()} points`);
+        console.log(`LAS file loaded: ${lasFile.pointsCount} points`);
         console.log('Point statistics:', pointCloudData.statistics);
         
         return pointCloudData;
@@ -198,6 +209,124 @@ async function loadLASFile() {
         updateLASStatus('❌', `Failed: ${error.message}`);
         throw error;
     }
+}
+
+/**
+ * Decide and render a performant 2D view from LAS points
+ */
+function tryAdd2DViewFromPointCloud() {
+    if (!pointCloudData || !pointCloudData.points?.length) return;
+
+    // Remove prior layers
+    if (glPointLayer) { map.removeLayer(glPointLayer); glPointLayer = null; }
+    if (heatLayer) { map.removeLayer(heatLayer); heatLayer = null; }
+
+    const lonLat = isLonLatPointCloud(pointCloudData.points);
+
+    if (lonLat && L.glify?.points) {
+        glPointLayer = renderPointCloudWebGL(pointCloudData.points);
+        layerControl?.addOverlay(glPointLayer, 'LiDAR Points (WebGL)');
+        // Fit bounds if not too large
+        const latLngs = sampleLatLngs(pointCloudData.points, 5000);
+        const bounds = L.latLngBounds(latLngs);
+        if (bounds.isValid()) map.fitBounds(bounds.pad(0.1));
+    } else if (lonLat && L.heatLayer) {
+        heatLayer = renderPointCloudHeatmap(pointCloudData.points);
+        layerControl?.addOverlay(heatLayer, 'LiDAR Density (Heatmap)');
+        const latLngs = sampleLatLngs(pointCloudData.points, 5000);
+        const bounds = L.latLngBounds(latLngs);
+        if (bounds.isValid()) map.fitBounds(bounds.pad(0.1));
+    } else {
+        // Projected coordinates unsupported without CRS. Suggest GeoTIFF workflow.
+        updateDataStatus('LAS loaded, but coordinates are projected. Import a GeoTIFF (DSM/CHM) for 2D view or provide CRS to transform to WGS84.');
+        updateRasterStatus('ℹ️', 'Awaiting GeoTIFF import for 2D visualization');
+    }
+
+    // Also show categorized circles as fallback small sample
+    // visualizePointCloudEnhanced();
+}
+
+function isLonLatPointCloud(points) {
+    // Check a small sample
+    const n = Math.min(1000, points.length);
+    let lonOk = 0, latOk = 0;
+    for (let i = 0; i < n; i += Math.max(1, Math.floor(n / 50))) {
+        const p = points[i];
+        if (Math.abs(p.x) <= 180) lonOk++;
+        if (Math.abs(p.y) <= 90) latOk++;
+    }
+    return lonOk > 0.9 * (n / Math.max(1, Math.floor(n / 50))) && latOk > 0.9 * (n / Math.max(1, Math.floor(n / 50)));
+}
+
+function sampleLatLngs(points, max = 10000) {
+    const out = [];
+    const step = Math.max(1, Math.floor(points.length / Math.min(max, points.length)));
+    for (let i = 0; i < points.length; i += step) {
+        const p = points[i];
+        out.push([p.y, p.x]);
+    }
+    return out;
+}
+
+function renderPointCloudWebGL(points) {
+    const max = Math.min(points.length, 1000000);
+    const step = Math.max(1, Math.floor(points.length / max));
+    const data = [];
+    const minZ = pointCloudData.bounds.minZ, maxZ = pointCloudData.bounds.maxZ;
+    for (let i = 0; i < points.length; i += step) {
+        const p = points[i];
+        data.push({
+            lat: p.y,
+            lng: p.x,
+            z: p.z,
+            classification: p.classification
+        });
+    }
+    const layer = L.glify.points({
+        map,
+        data,
+        click: (e, feature) => {},
+        color: (i, f) => {
+            const cls = f.classification || 0;
+            if (cls === 2) return [139/255, 69/255, 19/255, 0.8];
+            if (cls >= 3 && cls <= 5) {
+                const c = hexToRgba(getVegetationColor(f.z, minZ, maxZ));
+                return [c.r/255, c.g/255, c.b/255, 0.9];
+            }
+            if (cls === 6) return [1, 69/255, 0, 0.9];
+            const c = hexToRgba(getHeightColor(f.z, minZ, maxZ));
+            return [c.r/255, c.g/255, c.b/255, 0.75];
+        },
+        size: (i, f) => (f.classification >= 3 && f.classification <= 5 ? 2 : 1)
+    });
+    return layer;
+}
+
+function hexToRgba(hex) {
+    const h = hex.replace('#', '');
+    const bigint = parseInt(h, 16);
+    return {
+        r: (bigint >> 16) & 255,
+        g: (bigint >> 8) & 255,
+        b: bigint & 255,
+        a: 1
+    };
+}
+
+function renderPointCloudHeatmap(points) {
+    const max = Math.min(points.length, 200000);
+    const step = Math.max(1, Math.floor(points.length / max));
+    const heatPoints = [];
+    const minZ = pointCloudData.bounds.minZ, maxZ = pointCloudData.bounds.maxZ;
+    for (let i = 0; i < points.length; i += step) {
+        const p = points[i];
+        // weight by height in [0,1]
+        const w = (p.z - minZ) / (maxZ - minZ + 1e-6);
+        heatPoints.push([p.y, p.x, Math.max(0.1, w)]);
+    }
+    const layer = L.heatLayer(heatPoints, { radius: 8, blur: 12, maxZoom: 19 });
+    layer.addTo(map);
+    return layer;
 }
 
 /**
@@ -233,10 +362,10 @@ async function loadShapefiles() {
                     fetch(`${basePath}mcws_crowns.prj`)
                 ]);
                 
-                if (shpResponse.status === 'fulfilled' && dbfResponse.status === 'fulfilled') {
+                if (shpResponse.status === 'fulfilled' && shpResponse.value.ok && dbfResponse.status === 'fulfilled' && dbfResponse.value.ok) {
                     shpBuffer = await shpResponse.value.arrayBuffer();
                     dbfBuffer = await dbfResponse.value.arrayBuffer();
-                    prjText = prjResponse.status === 'fulfilled' ? await prjResponse.value.text() : null;
+                    prjText = (prjResponse.status === 'fulfilled' && prjResponse.value.ok) ? await prjResponse.value.text() : null;
                     console.log(`Successfully loaded shapefiles from: ${basePath}`);
                     break;
                 }
@@ -251,19 +380,7 @@ async function loadShapefiles() {
         }
         
         // Convert shapefile to GeoJSON using shapefile library
-        const source = shapefile.open(shpBuffer, dbfBuffer);
-        
-        const geojson = {
-            type: "FeatureCollection",
-            features: []
-        };
-        
-        // Process all features
-        let result = await source.read();
-        while (!result.done) {
-            geojson.features.push(result.value);
-            result = await source.read();
-        }
+        const geojson = await shapefile.read(shpBuffer, dbfBuffer);
         
         console.log(`Shapefile loaded: ${geojson.features.length} features`);
         return geojson;
@@ -287,11 +404,11 @@ async function loadTreeData() {
         } else {
             // If file doesn't exist, create sample data
             console.log('trees.geojson not found, using sample data');
-            createSampleData();
+            // createSampleData();
         }
     } catch (error) {
         console.log('Error loading trees.geojson, using sample data:', error);
-        createSampleData();
+        // createSampleData();
     }
 }
 
@@ -633,7 +750,7 @@ function createRealPointCloudViewer(treeProps) {
         </div>
         
         <!-- Loading indicator -->
-        <div style="position: absolute; bottom: 15px; right: 15px; background: rgba(76, 175, 80, 0.2); color: #4CAF50; padding: 8px 12px; border-radius: 6px; font-size: 0.8rem;">
+        <div style="position: absolute; bottom: 15px; right: 15px; background: rgba(76,175,80,0.2); color: #4CAF50; padding: 8px 12px; border-radius: 6px; font-size: 0.8rem;">
             ✅ Real point cloud loaded
         </div>
     `;
@@ -754,6 +871,8 @@ function setupEventListeners() {
     const importLASBtn = document.getElementById('importLASBtn');
     const importShapefileInput = document.getElementById('importShapefileInput');
     const importShapefileBtn = document.getElementById('importShapefileBtn');
+    const importGeoTIFFInput = document.getElementById('importGeoTIFFInput');
+    const importGeoTIFFBtn = document.getElementById('importGeoTIFFBtn');
     const exportCSVBtn = document.getElementById('exportCSVBtn');
     const exportGeoJSONBtn = document.getElementById('exportGeoJSONBtn');
     
@@ -769,6 +888,10 @@ function setupEventListeners() {
         importShapefileBtn.addEventListener('click', () => importShapefileInput.click());
         importShapefileInput.addEventListener('change', handleShapefileImport);
     }
+    if (importGeoTIFFBtn && importGeoTIFFInput) {
+        importGeoTIFFBtn.addEventListener('click', () => importGeoTIFFInput.click());
+        importGeoTIFFInput.addEventListener('change', handleGeoTIFFImport);
+    }
     if (exportCSVBtn) {
         exportCSVBtn.addEventListener('click', exportTableToCSV);
     }
@@ -782,6 +905,7 @@ function setupEventListeners() {
         reloadDataBtn.addEventListener('click', () => {
             updateLASStatus('⏳', 'Loading LAS file...');
             updateShapefileStatus('⏳', 'Loading shapefiles...');
+            updateRasterStatus('⏳', 'Loading GeoTIFF (if available)...');
             hideSetupInstructions();
             loadRawData();
         });
@@ -790,6 +914,7 @@ function setupEventListeners() {
     // Local file loading buttons (no server required)
     const loadLocalLASBtn = document.getElementById('loadLocalLASBtn');
     const loadLocalShapefileBtn = document.getElementById('loadLocalShapefileBtn');
+    const loadLocalGeoTIFFBtn = document.getElementById('loadLocalGeoTIFFBtn');
     
     if (loadLocalLASBtn) {
         loadLocalLASBtn.addEventListener('click', () => {
@@ -800,7 +925,10 @@ function setupEventListeners() {
                 const file = e.target.files[0];
                 if (file) {
                     updateLASStatus('⏳', 'Loading LAS file...');
-                    loadLASFileFromInput(file);
+                    loadLASFileFromInput(file).then(() => {
+                        updateLidarStatistics();
+                        tryAdd2DViewFromPointCloud();
+                    });
                 }
             };
             input.click();
@@ -820,6 +948,22 @@ function setupEventListeners() {
                     loadShapefilesFromInput(files);
                 } else {
                     alert('Please select at least .shp and .dbf files');
+                }
+            };
+            input.click();
+        });
+    }
+
+    if (loadLocalGeoTIFFBtn) {
+        loadLocalGeoTIFFBtn.addEventListener('click', () => {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.tif,.tiff';
+            input.onchange = (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    updateRasterStatus('⏳', 'Loading GeoTIFF...');
+                    loadGeoTIFFFromFile(file);
                 }
             };
             input.click();
@@ -1140,8 +1284,12 @@ function handleLASImport(event) {
             const lasFile = new LASFile(arrayBuffer);
             
             // Extract point cloud data
-            const points = lasFile.points;
+            const points = [];
             const header = lasFile.header;
+            for (let i = 0; i < lasFile.pointsCount; i++) {
+                const p = lasFile.getPoint(i);
+                if (p) points.push({ x: p.x, y: p.y, z: p.z, intensity: p.intensity||0, classification: p.classification||0, returnNumber: p.returnNumber||1, numberOfReturns: p.numberOfReturns||1 });
+            }
             
             pointCloudData = {
                 points: points,
@@ -1153,11 +1301,18 @@ function handleLASImport(event) {
                     maxY: header.maxY,
                     minZ: header.minZ,
                     maxZ: header.maxZ
+                },
+                statistics: {
+                    totalPoints: points.length,
+                    groundPoints: points.filter(p => p.classification === 2).length,
+                    vegetationPoints: points.filter(p => p.classification >= 3 && p.classification <= 5).length,
+                    buildingPoints: points.filter(p => p.classification === 6).length
                 }
             };
             
             // Add point cloud visualization to map
-            visualizePointCloud();
+            tryAdd2DViewFromPointCloud();
+            updateLidarStatistics();
             updateDataStatus(`LAS file loaded: ${points.length} points`);
             
         } catch (e) {
@@ -1167,6 +1322,76 @@ function handleLASImport(event) {
         }
     };
     reader.readAsArrayBuffer(file);
+}
+
+async function loadLASFileFromInput(file) {
+    return new Promise((resolve, reject) => {
+        if (typeof(Worker) === "undefined") {
+            updateLASStatus('❌', 'Web Workers not supported by this browser.');
+            return reject(new Error('Web Workers not supported.'));
+        }
+
+        updateLASStatus('⏳', 'Starting LAS processing worker...');
+        const worker = new Worker('las-worker.js');
+
+        worker.onmessage = (event) => {
+            const { type, payload } = event.data;
+
+            if (type === 'status') {
+                updateLASStatus('⏳', payload.text);
+            } else if (type === 'done') {
+                pointCloudData = payload;
+                updateLASStatus('✅', `LAS file loaded: ${pointCloudData.statistics.totalPoints.toLocaleString()} points`);
+                updateLidarStatistics();
+                tryAdd2DViewFromPointCloud();
+                worker.terminate();
+                resolve(pointCloudData);
+            } else if (type === 'error') {
+                console.error('Error from LAS worker:', payload);
+                updateLASStatus('❌', `Worker error: ${payload.message}`);
+                worker.terminate();
+                reject(new Error(payload.message));
+            }
+        };
+
+        worker.onerror = (error) => {
+            console.error('Unhandled worker error:', error);
+            updateLASStatus('❌', `Worker failed: ${error.message}`);
+            worker.terminate();
+            reject(error);
+        };
+
+        // Start the worker
+        worker.postMessage({ file });
+    });
+}
+
+async function loadShapefilesFromInput(files) {
+    updateShapefileStatus('⏳', 'Loading shapefiles...');
+    const shpFile = files.find(f => f.name.toLowerCase().endsWith('.shp'));
+    const dbfFile = files.find(f => f.name.toLowerCase().endsWith('.dbf'));
+
+    if (!shpFile || !dbfFile) {
+        alert('Please select at least .shp and .dbf files');
+        updateShapefileStatus('❌', 'Missing .shp or .dbf');
+        return;
+    }
+
+    try {
+        const [shpBuffer, dbfBuffer] = await Promise.all([
+            shpFile.arrayBuffer(),
+            dbfFile.arrayBuffer()
+        ]);
+
+        const geojson = await shapefile.read(shpBuffer, dbfBuffer);
+        processTreeData(geojson);
+        updateShapefileStatus('✅', `Shapefiles loaded: ${geojson.features.length} features`);
+        updateDataStatus('Shapefiles loaded successfully from input.');
+    } catch (error) {
+        console.error('Error loading shapefiles from input:', error);
+        updateShapefileStatus('❌', `Failed: ${error.message}`);
+        alert('Failed to load shapefiles. Please check the console for details.');
+    }
 }
 
 function handleShapefileImport(event) {
@@ -1329,590 +1554,75 @@ function updateShapefileStatus(icon, message) {
     }
 }
 
-function showSetupInstructions() {
-    const instructionsElement = document.getElementById('setupInstructions');
-    if (instructionsElement) {
-        instructionsElement.style.display = 'block';
-    }
-}
-
-function hideSetupInstructions() {
-    const instructionsElement = document.getElementById('setupInstructions');
-    if (instructionsElement) {
-        instructionsElement.style.display = 'none';
+function updateRasterStatus(icon, message) {
+    const statusElement = document.getElementById('rasterStatus');
+    if (statusElement) {
+        statusElement.innerHTML = `<span id="rasterIcon" style="margin-right: 8px;">${icon}</span><span>${message}</span>`;
     }
 }
 
 /**
- * Load LAS file directly from user input (no server required)
+ * GeoTIFF import and rendering
  */
-async function loadLASFileFromInput(file) {
+async function handleGeoTIFFImport(event) {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+    updateRasterStatus('⏳', 'Loading GeoTIFF...');
+    await loadGeoTIFFFromFile(file);
+}
+
+async function loadGeoTIFFFromFile(file) {
     try {
         const arrayBuffer = await file.arrayBuffer();
-        
-        // Check if LAS.js is available
-        if (typeof LASFile === 'undefined') {
-            throw new Error('LAS.js library not loaded. Please check the CDN link in index.html');
-        }
-        
-        // Parse LAS file using LAS.js
-        const lasFile = new LASFile(arrayBuffer);
-        
-        // Extract point cloud data
-        const points = lasFile.points;
-        const header = lasFile.header;
-        
-        pointCloudData = {
-            points: points,
-            header: header,
-            bounds: {
-                minX: header.minX,
-                maxX: header.maxX,
-                minY: header.minY,
-                maxY: header.maxY,
-                minZ: header.minZ,
-                maxZ: header.maxZ
+        const tiff = await GeoTIFF.fromArrayBuffer(arrayBuffer);
+        const image = await tiff.getImage();
+        const rasters = await image.readRasters({ interleave: true });
+        const pixelWidth = image.getWidth();
+        const pixelHeight = image.getHeight();
+        const bbox = image.getBoundingBox(); // [minX, minY, maxX, maxY] in raster CRS
+
+        // Build GeoRaster structure expected by georaster-layer-for-leaflet
+        const georaster = await parseGeoraster(arrayBuffer);
+
+        // Remove existing raster layer
+        if (rasterLayer) { map.removeLayer(rasterLayer); rasterLayer = null; }
+
+        rasterLayer = new GeoRasterLayer({
+            georaster,
+            opacity: 0.8,
+            pixelValuesToColorFn: values => {
+                // Single-band or multi-band
+                const v = Array.isArray(values) ? values[0] : values;
+                if (v === null || Number.isNaN(v)) return 'rgba(0,0,0,0)';
+                // Dynamic stretch between min/max if available
+                const min = georaster.mins ? georaster.mins[0] : v;
+                const max = georaster.maxs ? georaster.maxs[0] : v + 1;
+                const t = Math.min(1, Math.max(0, (v - min) / (max - min + 1e-6)));
+                // Color ramp (blue->green->red)
+                const r = Math.round(255 * t);
+                const g = Math.round(255 * Math.max(0, 1 - Math.abs(t - 0.5) * 2));
+                const b = Math.round(255 * (1 - t));
+                return `rgba(${r},${g},${b},0.85)`;
             }
-        };
-        
-        // Add point cloud visualization to map
-        visualizePointCloud();
-        
-        updateLASStatus('✅', `LAS file loaded: ${points.length.toLocaleString()} points`);
-        updateDataStatus(`LAS file "${file.name}" loaded successfully`);
-        
-        console.log(`LAS file loaded: ${points.length} points`);
-        
-    } catch (error) {
-        console.error('Error loading LAS file:', error);
-        updateLASStatus('❌', `Failed to load LAS file: ${error.message}`);
-        updateDataStatus(`Failed to load LAS file: ${error.message}`);
-    }
-}
-
-/**
- * Load shapefiles directly from user input (no server required)
- */
-async function loadShapefilesFromInput(files) {
-    try {
-        // Check if shapefile library is available
-        if (typeof shapefile === 'undefined') {
-            throw new Error('Shapefile.js library not loaded. Please check the CDN link in index.html');
-        }
-        
-        // Find required files
-        const shpFile = files.find(f => f.name.toLowerCase().endsWith('.shp'));
-        const dbfFile = files.find(f => f.name.toLowerCase().endsWith('.dbf'));
-        const prjFile = files.find(f => f.name.toLowerCase().endsWith('.prj'));
-        
-        if (!shpFile || !dbfFile) {
-            throw new Error('Required .shp and .dbf files not found');
-        }
-        
-        // Read files
-        const [shpBuffer, dbfBuffer, prjText] = await Promise.all([
-            shpFile.arrayBuffer(),
-            dbfFile.arrayBuffer(),
-            prjFile ? prjFile.text() : Promise.resolve(null)
-        ]);
-        
-        // Convert shapefile to GeoJSON using shapefile library
-        const source = shapefile.open(shpBuffer, dbfBuffer);
-        
-        const geojson = {
-            type: "FeatureCollection",
-            features: []
-        };
-        
-        // Process all features
-        let result = await source.read();
-        while (!result.done) {
-            geojson.features.push(result.value);
-            result = await source.read();
-        }
-        
-        // Process the tree data
-        processTreeData(geojson);
-        
-        updateShapefileStatus('✅', `Shapefiles loaded: ${geojson.features.length} features`);
-        updateDataStatus(`Shapefiles loaded successfully: ${geojson.features.length} tree crowns`);
-        
-        console.log(`Shapefile loaded: ${geojson.features.length} features`);
-        
-    } catch (error) {
-        console.error('Error loading shapefiles:', error);
-        updateShapefileStatus('❌', `Failed to load shapefiles: ${error.message}`);
-        updateDataStatus(`Failed to load shapefiles: ${error.message}`);
-    }
-}
-
-/**
- * Enhanced point cloud visualization with classification and segmentation
- */
-function visualizePointCloudEnhanced() {
-    if (!pointCloudData) return;
-    
-    // Clear existing point cloud markers
-    if (pointCloudData.markers) {
-        pointCloudData.markers.forEach(marker => map.removeLayer(marker));
-    }
-    
-    // Create layer groups for different point classifications
-    const groundLayer = L.layerGroup();
-    const vegetationLayer = L.layerGroup();
-    const buildingLayer = L.layerGroup();
-    const unclassifiedLayer = L.layerGroup();
-    
-    // Sample points for performance (max 15000 points)
-    const sampleSize = Math.min(15000, pointCloudData.points.length);
-    const step = Math.floor(pointCloudData.points.length / sampleSize);
-    
-    const pointMarkers = [];
-    
-    updateLASStatus('⏳', 'Visualizing point cloud...');
-    
-    for (let i = 0; i < pointCloudData.points.length; i += step) {
-        const point = pointCloudData.points[i];
-        
-        // Determine color based on classification and height
-        let color, layer;
-        const classification = point.classification || 0;
-        
-        switch (classification) {
-            case 2: // Ground
-                color = '#8B4513'; // Brown
-                layer = groundLayer;
-                break;
-            case 3: // Low vegetation
-            case 4: // Medium vegetation  
-            case 5: // High vegetation
-                color = getVegetationColor(point.z, pointCloudData.bounds.minZ, pointCloudData.bounds.maxZ);
-                layer = vegetationLayer;
-                break;
-            case 6: // Building
-                color = '#FF4500'; // Orange red
-                layer = buildingLayer;
-                break;
-            default: // Unclassified
-                color = getHeightColor(point.z, pointCloudData.bounds.minZ, pointCloudData.bounds.maxZ);
-                layer = unclassifiedLayer;
-        }
-        
-        const marker = L.circleMarker([point.y, point.x], {
-            radius: classification >= 3 && classification <= 5 ? 1.5 : 1, // Vegetation points slightly larger
-            color: color,
-            fillColor: color,
-            fillOpacity: 0.7,
-            stroke: false
         });
-        
-        // Add popup with point information
-        marker.bindPopup(`
-            <div style="font-size: 0.85rem;">
-                <strong>Point Information</strong><br>
-                <strong>Height:</strong> ${point.z.toFixed(2)}m<br>
-                <strong>Classification:</strong> ${getClassificationName(classification)}<br>
-                <strong>Intensity:</strong> ${point.intensity}<br>
-                <strong>Returns:</strong> ${point.returnNumber}/${point.numberOfReturns}
-            </div>
-        `);
-        
-        layer.addLayer(marker);
-        pointMarkers.push(marker);
-    }
-    
-    // Add layers to map
-    groundLayer.addTo(map);
-    vegetationLayer.addTo(map);
-    buildingLayer.addTo(map);
-    unclassifiedLayer.addTo(map);
-    
-    // Create layer control for point cloud
-    const pointCloudLayers = {
-        "Ground Points": groundLayer,
-        "Vegetation Points": vegetationLayer,
-        "Building Points": buildingLayer,
-        "Unclassified Points": unclassifiedLayer
-    };
-    
-    // Add to existing layer control
-    const layerControl = L.control.layers(null, pointCloudLayers);
-    layerControl.addTo(map);
-    
-    // Store markers and layers for cleanup
-    pointCloudData.markers = pointMarkers;
-    pointCloudData.layers = {
-        ground: groundLayer,
-        vegetation: vegetationLayer,
-        building: buildingLayer,
-        unclassified: unclassifiedLayer
-    };
-    
-    updateLASStatus('✅', `Point cloud visualized: ${pointMarkers.length.toLocaleString()} points`);
-    console.log('Enhanced point cloud visualization completed');
-}
+        rasterLayer.addTo(map);
+        layerControl?.addOverlay(rasterLayer, `GeoTIFF: ${file.name}`);
 
-/**
- * Get vegetation color based on height (green gradient)
- */
-function getVegetationColor(z, minZ, maxZ) {
-    const normalized = (z - minZ) / (maxZ - minZ);
-    if (normalized < 0.3) return '#90EE90'; // Light green for low vegetation
-    if (normalized < 0.7) return '#32CD32'; // Lime green for medium vegetation
-    return '#006400'; // Dark green for high vegetation
-}
-
-/**
- * Get classification name from code
- */
-function getClassificationName(classification) {
-    const names = {
-        0: 'Never classified',
-        1: 'Unclassified',
-        2: 'Ground',
-        3: 'Low Vegetation',
-        4: 'Medium Vegetation',
-        5: 'High Vegetation',
-        6: 'Building',
-        7: 'Low Point',
-        8: 'Reserved',
-        9: 'Water',
-        10: 'Rail',
-        11: 'Road Surface',
-        12: 'Reserved'
-    };
-    return names[classification] || `Class ${classification}`;
-}
-
-/**
- * Perform tree segmentation on point cloud data
- */
-function performTreeSegmentation() {
-    if (!pointCloudData || !pointCloudData.points.length) {
-        alert('No point cloud data available for segmentation');
-        return;
-    }
-    
-    updateDataStatus('Performing tree segmentation...');
-    
-    // Filter vegetation points (classifications 3, 4, 5)
-    const vegetationPoints = pointCloudData.points.filter(point => 
-        point.classification >= 3 && point.classification <= 5
-    );
-    
-    if (vegetationPoints.length === 0) {
-        alert('No vegetation points found for segmentation');
-        updateDataStatus('No vegetation points found');
-        return;
-    }
-    
-    // Perform clustering-based segmentation
-    const segments = performDBSCANClustering(vegetationPoints);
-    
-    // Convert segments to tree crown polygons
-    const treeCrowns = segments.map((segment, index) => {
-        const crownPolygon = createTreeCrownPolygon(segment);
-        const treeHeight = Math.max(...segment.map(p => p.z)) - Math.min(...segment.map(p => p.z));
-        const avgIntensity = segment.reduce((sum, p) => sum + p.intensity, 0) / segment.length;
-        
-        // Predict species based on height and intensity (simplified)
-        const predictedSpecies = predictSpeciesFromFeatures(treeHeight, avgIntensity, segment.length);
-        
-        return {
-            type: "Feature",
-            geometry: {
-                type: "Polygon",
-                coordinates: [crownPolygon]
-            },
-            properties: {
-                tree_id: `SEG_${(index + 1).toString().padStart(3, '0')}`,
-                predicted_species: predictedSpecies,
-                ground_truth_species: predictedSpecies, // In real scenario, this would come from field data
-                status: 'Segmented',
-                height: treeHeight.toFixed(2),
-                point_count: segment.length,
-                avg_intensity: avgIntensity.toFixed(1),
-                potree_path: `./data/segmented/tree_${index + 1}/`
-            }
-        };
-    });
-    
-    // Add segmented trees to the data
-    const segmentedData = {
-        type: "FeatureCollection",
-        features: treeCrowns
-    };
-    
-    // Process and display segmented trees
-    processTreeData(segmentedData);
-    
-    updateDataStatus(`Tree segmentation completed: ${treeCrowns.length} trees found`);
-    console.log(`Segmentation completed: ${treeCrowns.length} tree segments`);
-}
-
-/**
- * DBSCAN clustering algorithm for tree segmentation
- */
-function performDBSCANClustering(points, eps = 5.0, minPts = 50) {
-    const clusters = [];
-    const visited = new Set();
-    const clustered = new Set();
-    
-    points.forEach((point, index) => {
-        if (visited.has(index)) return;
-        
-        visited.add(index);
-        const neighbors = regionQuery(points, index, eps);
-        
-        if (neighbors.length < minPts) {
-            // Mark as noise
-            return;
+        // Fit to raster bounds if valid
+        if (georaster && georaster.bounds) {
+            const b = georaster.bounds;
+            const latLngBounds = L.latLngBounds([b[1], b[0]], [b[3], b[2]]);
+            if (latLngBounds.isValid()) map.fitBounds(latLngBounds.pad(0.05));
         }
-        
-        // Create new cluster
-        const cluster = [];
-        expandCluster(points, index, neighbors, cluster, eps, minPts, visited, clustered);
-        
-        if (cluster.length >= minPts) {
-            clusters.push(cluster);
-        }
-    });
-    
-    return clusters.filter(cluster => cluster.length >= 100); // Filter small clusters
-}
 
-/**
- * Find neighbors within epsilon distance
- */
-function regionQuery(points, pointIndex, eps) {
-    const neighbors = [];
-    const point = points[pointIndex];
-    
-    points.forEach((otherPoint, index) => {
-        if (index === pointIndex) return;
-        
-        const distance = Math.sqrt(
-            Math.pow(point.x - otherPoint.x, 2) + 
-            Math.pow(point.y - otherPoint.y, 2) +
-            Math.pow((point.z - otherPoint.z) * 0.1, 2) // Weight Z less for vegetation
-        );
-        
-        if (distance <= eps) {
-            neighbors.push(index);
-        }
-    });
-    
-    return neighbors;
-}
-
-/**
- * Expand cluster using DBSCAN algorithm
- */
-function expandCluster(points, pointIndex, neighbors, cluster, eps, minPts, visited, clustered) {
-    cluster.push(points[pointIndex]);
-    clustered.add(pointIndex);
-    
-    for (let i = 0; i < neighbors.length; i++) {
-        const neighborIndex = neighbors[i];
-        
-        if (!visited.has(neighborIndex)) {
-            visited.add(neighborIndex);
-            const neighborNeighbors = regionQuery(points, neighborIndex, eps);
-            
-            if (neighborNeighbors.length >= minPts) {
-                neighbors.push(...neighborNeighbors);
-            }
-        }
-        
-        if (!clustered.has(neighborIndex)) {
-            cluster.push(points[neighborIndex]);
-            clustered.add(neighborIndex);
-        }
+        updateRasterStatus('✅', `GeoTIFF loaded: ${file.name}`);
+        updateDataStatus(`GeoTIFF loaded successfully: ${file.name}`);
+    } catch (err) {
+        console.error('Failed to load GeoTIFF:', err);
+        updateRasterStatus('❌', 'Failed to load GeoTIFF');
+        updateDataStatus('Failed to load GeoTIFF');
+        alert('Failed to load GeoTIFF. Make sure it has georeferencing.');
     }
-}
-
-/**
- * Create tree crown polygon from point cluster
- */
-function createTreeCrownPolygon(points) {
-    if (points.length === 0) return [];
-    
-    // Find convex hull of points (simplified)
-    const hull = convexHull(points.map(p => [p.x, p.y]));
-    
-    // Smooth the polygon by adding intermediate points
-    const smoothedHull = smoothPolygon(hull);
-    
-    return smoothedHull;
-}
-
-/**
- * Convex hull algorithm (Graham scan)
- */
-function convexHull(points) {
-    if (points.length < 3) return points;
-    
-    // Find the bottom-most point
-    let bottom = 0;
-    for (let i = 1; i < points.length; i++) {
-        if (points[i][1] < points[bottom][1] || 
-            (points[i][1] === points[bottom][1] && points[i][0] < points[bottom][0])) {
-            bottom = i;
-        }
-    }
-    
-    // Swap bottom point to first position
-    [points[0], points[bottom]] = [points[bottom], points[0]];
-    
-    // Sort points by polar angle with respect to bottom point
-    const bottomPoint = points[0];
-    points.slice(1).sort((a, b) => {
-        const angleA = Math.atan2(a[1] - bottomPoint[1], a[0] - bottomPoint[0]);
-        const angleB = Math.atan2(b[1] - bottomPoint[1], b[0] - bottomPoint[0]);
-        return angleA - angleB;
-    });
-    
-    // Graham scan
-    const hull = [points[0], points[1]];
-    
-    for (let i = 2; i < points.length; i++) {
-        while (hull.length > 1 && 
-               crossProduct(hull[hull.length - 2], hull[hull.length - 1], points[i]) <= 0) {
-            hull.pop();
-        }
-        hull.push(points[i]);
-    }
-    
-    // Close the polygon
-    hull.push(hull[0]);
-    
-    return hull;
-}
-
-/**
- * Cross product for convex hull calculation
- */
-function crossProduct(o, a, b) {
-    return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
-}
-
-/**
- * Smooth polygon by adding intermediate points
- */
-function smoothPolygon(polygon) {
-    if (polygon.length < 4) return polygon;
-    
-    const smoothed = [];
-    for (let i = 0; i < polygon.length - 1; i++) {
-        const current = polygon[i];
-        const next = polygon[i + 1];
-        
-        smoothed.push(current);
-        
-        // Add intermediate point
-        const midX = (current[0] + next[0]) / 2;
-        const midY = (current[1] + next[1]) / 2;
-        smoothed.push([midX, midY]);
-    }
-    
-    return smoothed;
-}
-
-/**
- * Predict species from LiDAR-derived features
- */
-function predictSpeciesFromFeatures(height, avgIntensity, pointCount) {
-    // Simplified species prediction based on tree characteristics
-    // In a real implementation, this would use your trained ML model
-    
-    if (height > 20 && avgIntensity > 100) {
-        return 'Mahogany'; // Tall, high intensity
-    } else if (height > 15 && pointCount > 1000) {
-        return 'Narra'; // Medium tall, dense canopy
-    } else if (height > 10 && avgIntensity < 80) {
-        return 'Acacia'; // Medium height, lower intensity
-    } else if (height > 8) {
-        return 'Eucalyptus'; // Medium height
-    } else if (pointCount > 500) {
-        return 'Ipil-ipil'; // Dense low canopy
-    } else {
-        return 'Molave'; // Default for smaller trees
-    }
-}
-
-/**
- * Perform tree segmentation with custom parameters
- */
-function performTreeSegmentationWithParams(eps, minPts) {
-    if (!pointCloudData || !pointCloudData.points.length) {
-        alert('No point cloud data available for segmentation');
-        return;
-    }
-    
-    updateDataStatus(`Performing tree segmentation (eps=${eps}, minPts=${minPts})...`);
-    
-    // Filter vegetation points (classifications 3, 4, 5)
-    const vegetationPoints = pointCloudData.points.filter(point => 
-        point.classification >= 3 && point.classification <= 5
-    );
-    
-    if (vegetationPoints.length === 0) {
-        alert('No vegetation points found for segmentation');
-        updateDataStatus('No vegetation points found');
-        return;
-    }
-    
-    // Perform clustering-based segmentation with custom parameters
-    const segments = performDBSCANClustering(vegetationPoints, eps, minPts);
-    
-    if (segments.length === 0) {
-        alert('No tree segments found. Try adjusting the parameters.');
-        updateDataStatus('No tree segments found');
-        return;
-    }
-    
-    // Convert segments to tree crown polygons
-    const treeCrowns = segments.map((segment, index) => {
-        const crownPolygon = createTreeCrownPolygon(segment);
-        const treeHeight = Math.max(...segment.map(p => p.z)) - Math.min(...segment.map(p => p.z));
-        const avgIntensity = segment.reduce((sum, p) => sum + p.intensity, 0) / segment.length;
-        const crownArea = calculatePolygonArea(crownPolygon);
-        
-        // Predict species based on height and intensity (simplified)
-        const predictedSpecies = predictSpeciesFromFeatures(treeHeight, avgIntensity, segment.length);
-        
-        return {
-            type: "Feature",
-            geometry: {
-                type: "Polygon",
-                coordinates: [crownPolygon]
-            },
-            properties: {
-                tree_id: `SEG_${(index + 1).toString().padStart(3, '0')}`,
-                predicted_species: predictedSpecies,
-                ground_truth_species: predictedSpecies, // In real scenario, this would come from field data
-                status: 'Segmented',
-                height: treeHeight.toFixed(2),
-                point_count: segment.length,
-                avg_intensity: avgIntensity.toFixed(1),
-                crown_area: crownArea.toFixed(2),
-                potree_path: `./data/segmented/tree_${index + 1}/`
-            }
-        };
-    });
-    
-    // Add segmented trees to the data
-    const segmentedData = {
-        type: "FeatureCollection",
-        features: treeCrowns
-    };
-    
-    // Process and display segmented trees
-    processTreeData(segmentedData);
-    
-    updateDataStatus(`Tree segmentation completed: ${treeCrowns.length} trees found`);
-    updateLidarStatistics();
-    console.log(`Segmentation completed: ${treeCrowns.length} tree segments`);
 }
 
 /**
@@ -1937,6 +1647,9 @@ function clearPointCloudVisualization() {
         });
         pointCloudData.layers = {};
     }
+
+    if (glPointLayer) { map.removeLayer(glPointLayer); try { layerControl?.removeLayer?.(glPointLayer); } catch {}; glPointLayer = null; }
+    if (heatLayer) { map.removeLayer(heatLayer); try { layerControl?.removeLayer?.(heatLayer); } catch {}; heatLayer = null; }
     
     updateLASStatus('🗑️', 'Point cloud visualization cleared');
     updateDataStatus('Point cloud visualization removed from map');
@@ -1975,18 +1688,27 @@ function updateLidarStatistics() {
         return;
     }
     
-    const stats = pointCloudData.statistics;
+    const stats = pointCloudData.statistics || {
+        totalPoints: pointCloudData.points.length,
+        groundPoints: pointCloudData.points.filter(p => p.classification === 2).length,
+        vegetationPoints: pointCloudData.points.filter(p => p.classification >= 3 && p.classification <= 5).length,
+        buildingPoints: pointCloudData.points.filter(p => p.classification === 6).length
+    };
     const bounds = pointCloudData.bounds;
     
     // Update point counts
-    document.getElementById('totalPointsCount').textContent = stats.totalPoints.toLocaleString();
-    document.getElementById('groundPointsCount').textContent = stats.groundPoints.toLocaleString();
-    document.getElementById('vegetationPointsCount').textContent = stats.vegetationPoints.toLocaleString();
-    document.getElementById('buildingPointsCount').textContent = stats.buildingPoints.toLocaleString();
+    document.getElementById('totalPointsCount').textContent = (stats.totalPoints || 0).toLocaleString();
+    document.getElementById('groundPointsCount').textContent = (stats.groundPoints || 0).toLocaleString();
+    document.getElementById('vegetationPointsCount').textContent = (stats.vegetationPoints || 0).toLocaleString();
+    document.getElementById('buildingPointsCount').textContent = (stats.buildingPoints || 0).toLocaleString();
     
     // Update height range
-    const heightRange = `${bounds.minZ.toFixed(1)}m - ${bounds.maxZ.toFixed(1)}m`;
-    document.getElementById('heightRange').textContent = heightRange;
+    if (bounds) {
+        const heightRange = `${(bounds.minZ ?? 0).toFixed(1)}m - ${(bounds.maxZ ?? 0).toFixed(1)}m`;
+        document.getElementById('heightRange').textContent = heightRange;
+    } else {
+        document.getElementById('heightRange').textContent = '-';
+    }
 }
 
 console.log('LiDAR Tree Species Identification UI initialized successfully');
