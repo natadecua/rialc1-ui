@@ -9,7 +9,11 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     
-    <!-- LAS/LAZ parsing with las-wasm -->
+    <!-- Potree for high-performance point cloud visualization -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.156.1/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/potree@1.7.1/build/potree.min.js"></script>
+    
+    <!-- LAS/LAZ parsing with las-wasm (fallback for legacy support) -->
     <script src="https://unpkg.com/las-wasm@2.2.0/dist/las-wasm.js"></script>
 
     <!-- Shapefile parsing -->
@@ -140,12 +144,12 @@
                 <!-- Data Loading Section -->
                                 <!-- Data Loading Section -->
                 <section class="results-section">
-                    <h3>Data Loading</h3>
+                    <h3>Data Loading & Potree Integration</h3>
                     <div id="dataLoadingStatus" style="margin-bottom: 15px;">
                         <div style="display: flex; align-items: center; margin-bottom: 10px; gap: 20px; flex-wrap: wrap;">
-                            <div id="lasStatus" style="display: flex; align-items: center;">
-                                <span id="lasIcon" style="margin-right: 8px;">⏳</span>
-                                <span>Loading LAS file...</span>
+                            <div id="potreeStatus" style="display: flex; align-items: center;">
+                                <span id="potreeIcon" style="margin-right: 8px;">⏳</span>
+                                <span>Loading Potree point cloud...</span>
                             </div>
                             <div id="shapefileStatus" style="display: flex; align-items: center;">
                                 <span id="shapefileIcon" style="margin-right: 8px;">⏳</span>
@@ -160,23 +164,23 @@
                     </div>
                 </section>
 
-                <!-- Data Import/Export Section -->
+                <!-- Data Management Section -->
                 <section class="results-section">
-                    <h3>Data Management</h3>
+                    <h3>Data Management & Potree</h3>
                     <div class="import-export" style="margin-bottom: 15px;">
                         <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap;">
                             <input type="file" id="importGeoJSONInput" accept="application/geo+json,application/json" style="display:none" />
                             <button id="importGeoJSONBtn">Import GeoJSON</button>
-                            <input type="file" id="importLASInput" accept=".las,.laz" style="display:none" />
-                            <button id="importLASBtn">Import LAS/LAZ</button>
+                            <input type="file" id="importPotreeInput" accept=".zip,.ply,.las" style="display:none" />
+                            <button id="importPotreeBtn">Import Potree Data</button>
                             <input type="file" id="importShapefileInput" accept=".shp,.dbf,.prj,.shx" multiple style="display:none" />
                             <button id="importShapefileBtn">Import Shapefile</button>
                             <input type="file" id="importGeoTIFFInput" accept=".tif,.tiff" style="display:none" />
                             <button id="importGeoTIFFBtn">Import GeoTIFF (DSM/CHM)</button>
                         </div>
                         <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap;">
-                            <button id="loadLocalLASBtn" style="background: #28a745; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer;">
-                                📁 Load Local LAS File
+                            <button id="loadLocalPotreeBtn" style="background: #28a745; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer;">
+                                🌲 Load Potree Point Cloud
                             </button>
                             <button id="loadLocalShapefileBtn" style="background: #28a745; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer;">
                                 📁 Load Local Shapefiles
@@ -188,9 +192,9 @@
                     </div>
                 </section>
 
-                <!-- LiDAR Analysis Section -->
+                <!-- LiDAR Analysis with Potree Section -->
                 <section class="results-section">
-                    <h3>LiDAR Analysis</h3>
+                    <h3>LiDAR Analysis & Potree Viewer</h3>
                     <div id="lidarStats" style="background: #f8f9fa; padding: 15px; border-radius: 6px; margin-bottom: 15px;">
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 0.85rem;">
                             <div><strong>Total Points:</strong> <span id="totalPointsCount">-</span></div>
@@ -203,21 +207,55 @@
                         </div>
                     </div>
                     
-                    <!-- Segmentation Parameters -->
-                    <div id="segmentationParams" style="background: #e7f3ff; padding: 15px; border-radius: 6px; border-left: 4px solid #007bff;">
-                        <h4 style="margin: 0 0 10px 0; font-size: 1rem; color: #007bff;">Segmentation Parameters</h4>
+                    <!-- Potree Viewer Controls -->
+                    <div id="potreeControls" style="background: #e7f3ff; padding: 15px; border-radius: 6px; border-left: 4px solid #007bff;">
+                        <h4 style="margin: 0 0 10px 0; font-size: 1rem; color: #007bff;">Potree Viewer Controls</h4>
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 10px;">
                             <div>
-                                <label style="display: block; font-size: 0.85rem; margin-bottom: 5px; font-weight: 500;">Search Radius (m):</label>
-                                <input type="number" id="segmentationEps" value="5.0" min="1" max="20" step="0.5" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 0.85rem;">
+                                <label style="display: block; font-size: 0.85rem; margin-bottom: 5px; font-weight: 500;">Point Size:</label>
+                                <input type="range" id="pointSize" min="1" max="10" value="2" step="0.5" style="width: 100%;">
                             </div>
                             <div>
-                                <label style="display: block; font-size: 0.85rem; margin-bottom: 5px; font-weight: 500;">Min Points:</label>
-                                <input type="number" id="segmentationMinPts" value="50" min="10" max="200" step="10" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 0.85rem;">
+                                <label style="display: block; font-size: 0.85rem; margin-bottom: 5px; font-weight: 500;">Point Budget:</label>
+                                <select id="pointBudget" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 0.85rem;">
+                                    <option value="1000000">1M Points</option>
+                                    <option value="2000000">2M Points</option>
+                                    <option value="5000000" selected>5M Points</option>
+                                    <option value="10000000">10M Points</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 10px;">
+                            <div>
+                                <label style="display: block; font-size: 0.85rem; margin-bottom: 5px; font-weight: 500;">Coloring:</label>
+                                <select id="coloringMode" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 0.85rem;">
+                                    <option value="HEIGHT">Height</option>
+                                    <option value="CLASSIFICATION" selected>Classification</option>
+                                    <option value="INTENSITY">Intensity</option>
+                                    <option value="RGB">RGB</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label style="display: block; font-size: 0.85rem; margin-bottom: 5px; font-weight: 500;">Shape:</label>
+                                <select id="pointShape" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 0.85rem;">
+                                    <option value="SQUARE">Square</option>
+                                    <option value="CIRCLE" selected>Circle</option>
+                                </select>
                             </div>
                         </div>
                         <div style="font-size: 0.8rem; color: #666; margin-bottom: 10px;">
-                            <strong>Tip:</strong> Larger search radius finds bigger trees. More min points reduces noise but may miss small trees.
+                            <strong>Tip:</strong> Use classification coloring to distinguish trees (vegetation) from ground and buildings.
+                        </div>
+                        <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                            <button id="showTreeMarkersBtn" style="background: #28a745; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; font-size: 0.85rem;">
+                                🌳 Show Tree Markers
+                            </button>
+                            <button id="measurementToolBtn" style="background: #17a2b8; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; font-size: 0.85rem;">
+                                📏 Measurement Tool
+                            </button>
+                            <button id="clippingVolumeBtn" style="background: #6c757d; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; font-size: 0.85rem;">
+                                ✂️ Clipping Volume
+                            </button>
                         </div>
                     </div>
                 </section>
@@ -231,31 +269,51 @@
 
                 <!-- Model Card / About -->
                 <section class="results-section">
-                    <h3>About the Model</h3>
+                    <h3>About the Model & Potree Integration</h3>
                     <p style="font-size:0.9rem;color:#555">
-                        This UI visualizes a tree species identification model trained on LiDAR-derived features. It shows predictions vs. ground truth, training samples, and evaluation metrics. Replace the sample data by importing your own GeoJSON. The 3D modal simulates a point cloud view; integrate Potree for real data.
+                        This UI visualizes a tree species identification model using Potree for high-performance LiDAR point cloud visualization. 
+                        Potree provides industry-standard tools for forestry analysis including classification-based coloring, measurement tools, 
+                        and clipping volumes. Tree detection results are displayed as 3D markers directly on the source point cloud data.
                     </p>
+                    <div style="background: #f0f8ff; border: 1px solid #b8d4f1; border-radius: 6px; padding: 15px; margin-top: 15px;">
+                        <h4 style="color: #0066cc; margin-bottom: 10px; font-size: 1rem;">🔧 Potree Workflow</h4>
+                        <ol style="margin: 0; padding-left: 20px; font-size: 0.85rem; color: #333;">
+                            <li><strong>Inspect & Prepare:</strong> Use QGIS to load LAS files and shapefiles, verify coordinate systems</li>
+                            <li><strong>Convert:</strong> Use PotreeConverter to convert LAS files to Potree format</li>
+                            <li><strong>Visualize:</strong> Load converted data in this Potree-based viewer for analysis</li>
+                            <li><strong>Analyze:</strong> Use measurement tools, clipping volumes, and tree markers for detailed examination</li>
+                        </ol>
+                    </div>
                 </section>
 
                 <!-- Setup Instructions -->
                 <section class="results-section" id="setupInstructions" style="display: none;">
-                    <h3>Setup Instructions</h3>
+                    <h3>Potree Setup Instructions</h3>
                     <div style="background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 6px; padding: 15px; margin-bottom: 15px;">
-                        <h4 style="color: #856404; margin-bottom: 10px;">🚨 CORS Error - Choose Your Solution</h4>
+                        <h4 style="color: #856404; margin-bottom: 10px;">🚨 For Best Results - Use PotreeConverter</h4>
                         <p style="color: #856404; margin-bottom: 15px;">
-                            To load your LAS and shapefile data, you have two options:
+                            For optimal performance with large LAS files, convert them using PotreeConverter first:
                         </p>
                         
+                        <div style="background: #f8f9fa; border-radius: 4px; padding: 10px; font-family: monospace; font-size: 0.9rem; margin-bottom: 15px;">
+                            <div style="margin-bottom: 5px;"><strong>Download PotreeConverter:</strong></div>
+                            <div style="color: #007bff;">https://github.com/potree/PotreeConverter/releases</div>
+                            <div style="margin: 10px 0 5px 0;"><strong>Convert LAS to Potree format:</strong></div>
+                            <div style="color: #28a745;">./PotreeConverter.exe input.las -o output_directory</div>
+                            <div style="margin: 10px 0 5px 0;"><strong>Then load the converted data:</strong></div>
+                            <div style="color: #007bff;">Use "Load Potree Point Cloud" button above</div>
+                        </div>
+                        
                         <div style="margin-bottom: 15px;">
-                            <h5 style="color: #856404; margin-bottom: 8px;">✅ Option 1 - Easy: Use Local File Buttons (Recommended)</h5>
+                            <h5 style="color: #856404; margin-bottom: 8px;">✅ Alternative: Direct File Loading</h5>
                             <p style="color: #856404; font-size: 0.9rem; margin-bottom: 8px;">
-                                Click the green "📁 Load Local LAS File", "📁 Load Local Shapefiles", or "🗺️ Load Local GeoTIFF" buttons above to load your files directly without a server.
+                                You can also load LAS files directly, but performance may be limited for very large files.
                             </p>
                         </div>
                         
                         <div style="background: #f8f9fa; border-radius: 4px; padding: 10px; font-family: monospace; font-size: 0.9rem;">
-                            <div style="margin-bottom: 5px;"><strong>Option 2 - Local Server (PowerShell):</strong></div>
-                            <div style="color: #28a745;">cd "c:\\Users\\natha\\rialc1-ui"</div>
+                            <div style="margin-bottom: 5px;"><strong>Local Server (PowerShell) - if needed:</strong></div>
+                            <div style="color: #28a745;">cd "path/to/rialc1-ui"</div>
                             <div style="color: #28a745;">python -m http.server 8000</div>
                             <div style="margin-top: 10px; margin-bottom: 5px;"><strong>Then visit:</strong></div>
                             <div style="color: #007bff;">http://localhost:8000</div>
@@ -266,11 +324,11 @@
         </div>
     </div>
 
-    <!-- 3D Tree Viewer Modal -->
+    <!-- Potree 3D Tree Viewer Modal -->
     <div id="treeModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h2 id="modalTitle">Tree Details</h2>
+                <h2 id="modalTitle">Tree Details - Potree Viewer</h2>
                 <span class="close" id="closeModal">&times;</span>
             </div>
             <div class="modal-body">
@@ -279,6 +337,33 @@
                 </div>
                 <div class="potree-container" id="potreeContainer">
                     <!-- Potree viewer will be initialized here -->
+                    <div id="potree_render_area" style="width: 100%; height: 100%; position: relative;">
+                        <canvas id="potree_canvas" style="width: 100%; height: 100%;"></canvas>
+                    </div>
+                    <!-- Potree viewer controls overlay -->
+                    <div id="potree_sidebar" class="potree-sidebar">
+                        <div class="potree-controls">
+                            <h4>Viewer Controls</h4>
+                            <div class="control-group">
+                                <label>Point Size:</label>
+                                <input type="range" id="modal_pointSize" min="1" max="10" value="2" step="0.5">
+                            </div>
+                            <div class="control-group">
+                                <label>Coloring:</label>
+                                <select id="modal_coloringMode">
+                                    <option value="HEIGHT">Height</option>
+                                    <option value="CLASSIFICATION" selected>Classification</option>
+                                    <option value="INTENSITY">Intensity</option>
+                                    <option value="RGB">RGB</option>
+                                </select>
+                            </div>
+                            <div class="control-group">
+                                <button id="focusTreeBtn" class="potree-btn">🎯 Focus on Tree</button>
+                                <button id="measureDistanceBtn" class="potree-btn">📏 Measure</button>
+                                <button id="resetViewBtn" class="potree-btn">🔄 Reset View</button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
