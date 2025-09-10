@@ -10,7 +10,7 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     
     <!-- LAS/LAZ parsing with las-wasm -->
-    <script src="https://unpkg.com/las-wasm@2.2.0/dist/las-wasm.js" defer></script>
+    <script src="https://unpkg.com/las-wasm@2.2.0/dist/las-wasm.js"></script>
 
     <!-- Shapefile parsing -->
     <script src="https://unpkg.com/shapefile@0.6.6/dist/shapefile.js"></script>
@@ -184,45 +184,6 @@
                             <button id="loadLocalGeoTIFFBtn" style="background: #28a745; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer;">
                                 🗺️ Load Local GeoTIFF
                             </button>
-                        </div>
-
-                <!-- Data Import/Export Section -->
-                <section class="results-section">
-                    <h3>Data Management</h3>
-                    <div class="import-export" style="margin-bottom: 15px;">
-                        <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap;">
-                            <input type="file" id="importGeoJSONInput" accept="application/geo+json,application/json" style="display:none" />
-                            <button id="importGeoJSONBtn">Import GeoJSON</button>
-                            <input type="file" id="importLASInput" accept=".las,.laz" style="display:none" />
-                            <button id="importLASBtn">Import LAS/LAZ</button>
-                            <input type="file" id="importShapefileInput" accept=".shp,.dbf,.prj,.shx" multiple style="display:none" />
-                            <button id="importShapefileBtn">Import Shapefile</button>
-                            <input type="file" id="importGeoTIFFInput" accept=".tif,.tiff" style="display:none" />
-                            <button id="importGeoTIFFBtn">Import GeoTIFF (DSM/CHM)</button>
-                        </div>
-                        <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap;">
-                            <button id="loadLocalLASBtn" style="background: #28a745; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer;">
-                                📁 Load Local LAS File
-                            </button>
-                            <button id="loadLocalShapefileBtn" style="background: #28a745; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer;">
-                                📁 Load Local Shapefiles
-                            </button>
-                            <button id="loadLocalGeoTIFFBtn" style="background: #28a745; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer;">
-                                🗺️ Load Local GeoTIFF
-                            </button>
-                        </div>
-                        <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap;">
-                            <button id="performSegmentationBtn" style="background: #17a2b8; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer;">
-                                🌳 Perform Tree Segmentation
-                            </button>
-                            <button id="clearPointCloudBtn" style="background: #dc3545; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer;">
-                                🗑️ Clear Point Cloud
-                            </button>
-                        </div>
-                        <div style="display: flex; gap: 10px; align-items: center;">
-                            <button id="exportCSVBtn">Export CSV</button>
-                            <button id="exportGeoJSONBtn">Export GeoJSON</button>
-                            <button id="reloadDataBtn">Reload Raw Data</button>
                         </div>
                     </div>
                 </section>

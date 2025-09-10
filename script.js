@@ -23,29 +23,66 @@ const statusColors = {
 
 // Initialize the application when DOM is loaded
 document.addEventListener('DOMContentLoaded', async function() {
-    await initializeLasWasm();
+    console.log('LiDAR Tree Species Identification UI initialized successfully');
+    
     initializeMap();
-    loadRawData();
     setupEventListeners();
+    
+    // Initialize las-wasm first, then load data
+    const lasInitialized = await initializeLasWasm();
+    if (lasInitialized) {
+        loadRawData();
+    } else {
+        console.warn('las-wasm initialization failed, some features will be limited');
+        updateDataStatus('LAS library failed to initialize - LAS file loading disabled');
+        // Still try to load shapefiles even if LAS fails
+        loadShapefiles().then(result => {
+            if (result) {
+                processTreeData(result);
+                updateShapefileStatus('✅', 'Shapefiles loaded successfully');
+            } else {
+                updateShapefileStatus('❌', 'Failed to load shapefiles');
+                createSampleData();
+            }
+        }).catch(error => {
+            console.error('Shapefile loading error:', error);
+            updateShapefileStatus('❌', 'Failed to load shapefiles');
+            createSampleData();
+        });
+    }
 });
 
 async function initializeLasWasm() {
+    // Wait for the las-wasm script to load and be available
     let attempts = 0;
-    while (!window.lasWasm && attempts < 50) { // Wait up to 5 seconds
+    const maxAttempts = 100; // Wait up to 10 seconds
+    
+    while (!window.lasWasm && attempts < maxAttempts) {
         await new Promise(resolve => setTimeout(resolve, 100));
         attempts++;
     }
 
-    if (window.lasWasm) {
-        try {
-            const { LASLoader } = await window.lasWasm();
-            lasLoaderInstance = LASLoader;
-            console.log('las-wasm initialized successfully');
-        } catch (err) {
-            console.error('Failed to initialize las-wasm', err);
-        }
-    } else {
+    if (!window.lasWasm) {
         console.error('las-wasm script not loaded after waiting!');
+        updateLASStatus('❌', 'LAS library failed to load');
+        return false;
+    }
+
+    try {
+        console.log('Initializing las-wasm...');
+        const lasWasmModule = await window.lasWasm();
+        if (lasWasmModule && lasWasmModule.LASLoader) {
+            lasLoaderInstance = lasWasmModule.LASLoader;
+            console.log('las-wasm initialized successfully');
+            updateLASStatus('⏳', 'LAS library ready');
+            return true;
+        } else {
+            throw new Error('LASLoader not found in las-wasm module');
+        }
+    } catch (err) {
+        console.error('Failed to initialize las-wasm:', err);
+        updateLASStatus('❌', 'LAS library initialization failed');
+        return false;
     }
 }
 
@@ -53,26 +90,52 @@ async function initializeLasWasm() {
  * Initialize Leaflet map
  */
 function initializeMap() {
-    // Initialize map centered on La Mesa Ecopark
-    map = L.map('map').setView([14.6760, 121.0437], 16);
-    
-    // Base layers
-    const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap contributors'
-    }).addTo(map);
-    const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-        attribution: '© Esri'
-    });
+    // Check if Leaflet is available
+    if (typeof L === 'undefined') {
+        console.error('Leaflet library not available. Map functionality disabled.');
+        updateDataStatus('❌ Map library not loaded - some features disabled');
+        // Show message in map container
+        const mapContainer = document.getElementById('map');
+        if (mapContainer) {
+            mapContainer.innerHTML = `
+                <div style="display: flex; align-items: center; justify-content: center; height: 100%; background: #f8f9fa; border: 2px dashed #dee2e6; color: #6c757d; text-align: center; padding: 20px;">
+                    <div>
+                        <h4>Map Not Available</h4>
+                        <p>External map library (Leaflet) could not be loaded.<br>
+                        Some visualization features are disabled.</p>
+                        <p><small>This may be due to network restrictions or ad blockers.</small></p>
+                    </div>
+                </div>
+            `;
+        }
+        return;
+    }
 
-    const baseMaps = {
-        'OpenStreetMap': osm,
-        'Satellite': satelliteLayer
-    };
+    try {
+        // Initialize map centered on La Mesa Ecopark
+        map = L.map('map').setView([14.6760, 121.0437], 16);
+        
+        // Base layers
+        const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+        const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            attribution: '© Esri'
+        });
 
-    // Single layer control instance
-    layerControl = L.control.layers(baseMaps, {}).addTo(map);
-    
-    console.log('Leaflet map initialized successfully');
+        const baseMaps = {
+            'OpenStreetMap': osm,
+            'Satellite': satelliteLayer
+        };
+
+        // Single layer control instance
+        layerControl = L.control.layers(baseMaps, {}).addTo(map);
+        
+        console.log('Leaflet map initialized successfully');
+    } catch (error) {
+        console.error('Error initializing map:', error);
+        updateDataStatus('❌ Map initialization failed');
+    }
 }
 
 /**
@@ -130,8 +193,10 @@ async function loadRawData() {
  */
 async function loadLASFile() {
     if (!lasLoaderInstance) {
-        throw new Error('las-wasm is not initialized.');
+        updateLASStatus('❌', 'LAS library not initialized');
+        throw new Error('las-wasm is not initialized. Please refresh the page and wait for the library to load.');
     }
+    
     try {
         // Try multiple possible paths
         const possiblePaths = [
@@ -336,8 +401,12 @@ async function loadShapefiles() {
     try {
         // Check if shapefile library is available
         if (typeof shapefile === 'undefined') {
-            throw new Error('Shapefile.js library not loaded. Please check the CDN link in index.html');
+            console.warn('Shapefile.js library not loaded. Using fallback sample data.');
+            updateShapefileStatus('⚠️', 'Shapefile library not available - using sample data');
+            return createSampleGeoJSON();
         }
+        
+        console.log('Trying to load shapefiles from: raw_data/crown_shp/');
         
         // Try multiple possible paths
         const basePaths = [
@@ -421,6 +490,16 @@ function createSampleData() {
         "features": generateSampleTrees(50)
     };
     processTreeData(sampleData);
+}
+
+/**
+ * Create sample GeoJSON data when external libraries fail
+ */
+function createSampleGeoJSON() {
+    return {
+        "type": "FeatureCollection",
+        "features": generateSampleTrees(50)
+    };
 }
 
 /**
@@ -558,6 +637,12 @@ function generateMLPrediction(groundTruth) {
  * Add tree polygons to the Leaflet map
  */
 function addTreesToMap() {
+    // Check if map is available
+    if (!map || typeof L === 'undefined') {
+        console.log('Map not available, skipping tree visualization');
+        return;
+    }
+    
     // Clear existing tree polygons
     treePolygons.forEach(polygon => map.removeLayer(polygon));
     treePolygons = [];
