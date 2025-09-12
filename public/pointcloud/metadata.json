@@ -1,0 +1,32 @@
+{
+  "version": "1.7",
+  "name": "Forest LiDAR Point Cloud",
+  "description": "Segmented forest point cloud with tree classification",
+  "points": 50000000,
+  "boundingBox": {
+    "lx": 0,
+    "ly": 0,
+    "lz": 0,
+    "ux": 1000,
+    "uy": 1000,
+    "uz": 100
+  },
+  "tightBoundingBox": {
+    "lx": 0,
+    "ly": 0,
+    "lz": 0,
+    "ux": 1000,
+    "uy": 1000,
+    "uz": 100
+  },
+  "pointAttributes": [
+    "POSITION_CARTESIAN",
+    "COLOR_PACKED",
+    "CLASSIFICATION",
+    "TREE_ID"
+  ],
+  "spacing": 0.1,
+  "scale": [0.001, 0.001, 0.001],
+  "hierarchyStepSize": 5,
+  "octreeDir": "data"
+}

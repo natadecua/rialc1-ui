@@ -1,0 +1,135 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [100.245, 45.678]
+      },
+      "properties": {
+        "tree_id": 1,
+        "predicted_species": "Pinus sylvestris",
+        "ground_truth": "Pinus sylvestris",
+        "status": "Correct"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [100.251, 45.682]
+      },
+      "properties": {
+        "tree_id": 2,
+        "predicted_species": "Picea abies",
+        "ground_truth": "Betula pendula",
+        "status": "Incorrect"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [100.248, 45.675]
+      },
+      "properties": {
+        "tree_id": 3,
+        "predicted_species": "Betula pendula",
+        "ground_truth": "Betula pendula",
+        "status": "Correct"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [100.256, 45.685]
+      },
+      "properties": {
+        "tree_id": 4,
+        "predicted_species": "Quercus robur",
+        "ground_truth": "Unknown",
+        "status": "Training"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [100.243, 45.671]
+      },
+      "properties": {
+        "tree_id": 5,
+        "predicted_species": "Pinus sylvestris",
+        "ground_truth": "Picea abies",
+        "status": "Incorrect"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [100.252, 45.679]
+      },
+      "properties": {
+        "tree_id": 6,
+        "predicted_species": "Picea abies",
+        "ground_truth": "Picea abies",
+        "status": "Correct"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [100.259, 45.688]
+      },
+      "properties": {
+        "tree_id": 7,
+        "predicted_species": "Betula pendula",
+        "ground_truth": "Unknown",
+        "status": "Training"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [100.241, 45.673]
+      },
+      "properties": {
+        "tree_id": 8,
+        "predicted_species": "Quercus robur",
+        "ground_truth": "Quercus robur",
+        "status": "Correct"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [100.254, 45.681]
+      },
+      "properties": {
+        "tree_id": 9,
+        "predicted_species": "Pinus sylvestris",
+        "ground_truth": "Unknown",
+        "status": "Training"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [100.247, 45.677]
+      },
+      "properties": {
+        "tree_id": 10,
+        "predicted_species": "Picea abies",
+        "ground_truth": "Pinus sylvestris",
+        "status": "Incorrect"
+      }
+    }
+  ]
+}
