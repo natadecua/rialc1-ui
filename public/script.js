@@ -9,6 +9,8 @@ let currentSortColumn = null;
 let currentSortDirection = 'asc';
 let map;
 let treeLayers = L.layerGroup(); // Use a layer group for tree polygons
+let predictionData = []; // Store prediction data from CSV
+let isPredictionMode = false; // Toggle between species view and prediction view
 
 // Color mapping for different tree species
 const speciesColors = {
@@ -37,8 +39,31 @@ const dynamicColorPalette = [
 const dynamicSpeciesColors = {};
 let colorIndex = 0;
 
-// Function to get color based on species
-function getSpeciesColor(species) {
+// Function to get color based on species or prediction status
+function getSpeciesColor(species, treeId) {
+    // If we're in prediction mode and we have a treeId, check prediction status
+    if (isPredictionMode && treeId) {
+        // Convert treeId to string for comparison
+        const treeIdStr = treeId.toString();
+        
+        // Find the tree data for this tree
+        const treeData = predictionData.find(p => p.treeId === treeIdStr);
+        
+        if (treeData) {
+            if (treeData.isTraining) {
+                // Return color for training trees
+                return '#FFC107'; // Amber color for training data
+            } else {
+                // Return color based on prediction correctness
+                console.log(`Found prediction for tree ${treeIdStr}: ${treeData.correct ? 'correct' : 'incorrect'}`);
+                return treeData.correct ? '#4CAF50' : '#F44336'; // Green for correct, Red for incorrect
+            }
+        } else {
+            console.log(`No data found for tree ${treeIdStr}`);
+        }
+    }
+    
+    // Regular species coloring (when not in prediction mode or no tree data found)
     if (!species) return speciesColors.default;
     
     // Try to find direct match in predefined colors
@@ -67,6 +92,129 @@ function getSpeciesColor(species) {
     return newColor;
 }
 
+// Toggle between normal view and prediction view
+function togglePredictionMode() {
+    isPredictionMode = document.getElementById('predictionModeToggle').checked;
+    
+    console.log("Prediction mode:", isPredictionMode ? "ON" : "OFF");
+    
+    // Update filter UI elements based on mode
+    const speciesFilters = document.getElementById('speciesFilters');
+    const predictionFilters = document.getElementById('predictionFilters');
+    
+    if (speciesFilters) {
+        speciesFilters.style.display = isPredictionMode ? 'none' : 'block';
+    }
+    
+    if (predictionFilters) {
+        predictionFilters.style.display = isPredictionMode ? 'block' : 'none';
+        
+        // Update filter checkboxes based on data availability
+        if (isPredictionMode) {
+            const hasCorrect = predictionData.some(p => !p.isTraining && p.correct);
+            const hasIncorrect = predictionData.some(p => !p.isTraining && !p.correct);
+            const hasTraining = predictionData.some(p => p.isTraining);
+            
+            const correctCheck = document.getElementById('filterCorrect');
+            const incorrectCheck = document.getElementById('filterIncorrect');
+            const trainingCheck = document.getElementById('filterTraining');
+            
+            if (correctCheck) correctCheck.disabled = !hasCorrect;
+            if (incorrectCheck) incorrectCheck.disabled = !hasIncorrect;
+            if (trainingCheck) trainingCheck.disabled = !hasTraining;
+        }
+    }
+    
+    // Check if we have any prediction data
+    if (isPredictionMode && predictionData.length === 0) {
+        console.warn("No prediction data available");
+        alert("No prediction data available. Please check that the prediction_results.csv file is present.");
+    }
+    
+    // Update the map with new coloring
+    addTreesToMap();
+    
+    // Update the table with prediction info
+    populateResultsTable();
+    
+    // Update the legend to show prediction colors instead of species colors
+    updateLegendForPredictionMode();
+}
+
+// Function to load prediction data from CSV
+async function loadPredictionData() {
+    try {
+        const response = await fetch('/raw_data/prediction_results.csv');
+        const csv = await response.text();
+        
+        // Parse CSV
+        const lines = csv.split('\n');
+        const headers = lines[0].split(',');
+        
+        // Map group numbers to species names for better display
+        const groupToSpecies = {
+            '1.0': 'Pine', 
+            '2.0': 'Mahogany',
+            '3.0': 'Narra',
+            '4.0': 'Acacia',
+            '5.0': 'Dipterocarp'
+        };
+        
+        const allTreeData = [];  // Combined array for both test and training trees
+        
+        for (let i = 1; i < lines.length; i++) {
+            if (!lines[i].trim()) continue;
+            
+            const values = lines[i].split(',');
+            
+            // Make sure we convert any floating point numbers to integers for tree IDs
+            // This converts "1.0" to "1" for proper matching with shapefile tree IDs
+            let treeId = values[0].trim();
+            if (treeId.endsWith(".0")) {
+                treeId = treeId.substring(0, treeId.length - 2);
+            }
+            
+            const actualGroup = values[1].trim();
+            const splitType = values[2].trim();
+            const actualSpecies = groupToSpecies[actualGroup] || `Group ${actualGroup}`;
+            
+            if (splitType === 'test' && values[3] && values[3].trim() !== '') {
+                // For test data with predictions
+                const predictedGroup = values[3].trim();
+                const isCorrect = values[4] && values[4].trim() === '1.0';
+                
+                const predictionObj = {
+                    treeId: treeId,
+                    actual: actualSpecies,
+                    predicted: groupToSpecies[predictedGroup] || `Group ${predictedGroup}`,
+                    correct: isCorrect,
+                    isTraining: false,
+                    dataType: 'test'
+                };
+                allTreeData.push(predictionObj);
+            } else if (splitType === 'train') {
+                // For training data
+                const trainingObj = {
+                    treeId: treeId,
+                    actual: actualSpecies,
+                    isTraining: true,
+                    dataType: 'train'
+                };
+                allTreeData.push(trainingObj);
+            }
+        }
+        
+        const testTrees = allTreeData.filter(tree => tree.dataType === 'test');
+        const trainingTrees = allTreeData.filter(tree => tree.dataType === 'train');
+        
+        console.log(`Loaded ${testTrees.length} test trees and ${trainingTrees.length} training trees`);
+        return allTreeData;
+    } catch (error) {
+        console.error('Error loading prediction data:', error);
+        return [];
+    }
+}
+
 // --- Application Initialization ---
 document.addEventListener('DOMContentLoaded', async function() {
     console.log('LiDAR Tree Species Identification UI initialized successfully');
@@ -85,6 +233,18 @@ document.addEventListener('DOMContentLoaded', async function() {
     initializeMap();
     setupEventListeners();
     await loadData();
+    
+    // Load prediction data
+    predictionData = await loadPredictionData();
+    console.log(`Loaded ${predictionData.length} prediction records`);
+    
+    // Log the first few prediction records for debugging
+    if (predictionData.length > 0) {
+        console.log("Sample prediction records:");
+        for (let i = 0; i < Math.min(5, predictionData.length); i++) {
+            console.log(`Tree ${predictionData[i].treeId}: ${predictionData[i].actual} → ${predictionData[i].predicted} (${predictionData[i].correct ? 'Correct' : 'Incorrect'})`);
+        }
+    }
 });
 
 /**
@@ -99,9 +259,6 @@ function initializeMap() {
         minZoom: 15,
         maxZoom: 22,
     });
-    
-    // Add measurement control
-    addMeasurementTools();
 
     const osmBase = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
@@ -214,52 +371,143 @@ function createSpeciesLegend() {
         div.style.overflowY = 'auto';
         div.style.minWidth = '180px';
         
-        // Collect species data
-        const speciesData = collectSpeciesData();
-        const speciesNames = Object.keys(speciesData).sort();
-        
-        // Add title
-        div.innerHTML = '<div style="font-weight: bold; margin-bottom: 8px; font-size: 14px;">Tree Species</div>';
-        
-        // Add each species to the legend
-        speciesNames.forEach(name => {
-            const data = speciesData[name];
-            const item = document.createElement('div');
-            item.style.display = 'flex';
-            item.style.alignItems = 'center';
-            item.style.marginBottom = '5px';
+        if (isPredictionMode) {
+            // Prediction mode legend
+            div.innerHTML = '<div style="font-weight: bold; margin-bottom: 8px; font-size: 14px;">Prediction Results</div>';
             
-            const colorBox = document.createElement('span');
-            colorBox.style.display = 'inline-block';
-            colorBox.style.width = '15px';
-            colorBox.style.height = '15px';
-            colorBox.style.backgroundColor = data.color;
-            colorBox.style.marginRight = '5px';
-            colorBox.style.borderRadius = '3px';
+            // Count correct, incorrect predictions and training trees
+            let correctCount = 0;
+            let incorrectCount = 0;
+            let trainingCount = 0;
             
-            const nameSpan = document.createElement('span');
-            nameSpan.textContent = `${name} (${data.count})`;
-            nameSpan.style.fontSize = '12px';
+            predictionData.forEach(tree => {
+                if (tree.isTraining) {
+                    trainingCount++;
+                } else if (tree.correct) {
+                    correctCount++;
+                } else {
+                    incorrectCount++;
+                }
+            });
             
-            item.appendChild(colorBox);
-            item.appendChild(nameSpan);
-            div.appendChild(item);
-        });
-        
-        // Also add dynamically assigned colors
-        const dynamicSpeciesNames = Object.keys(dynamicSpeciesColors).filter(name => !speciesNames.includes(name)).sort();
-        
-        if (dynamicSpeciesNames.length > 0) {
-            // Add separator if we have both predefined and dynamic colors
-            if (speciesNames.length > 0) {
+            // Calculate total test predictions
+            const totalPredictions = correctCount + incorrectCount;
+            const totalTrees = totalPredictions + trainingCount;
+            
+            // Create legend item for training data
+            const trainingItem = document.createElement('div');
+            trainingItem.style.display = 'flex';
+            trainingItem.style.alignItems = 'center';
+            trainingItem.style.marginBottom = '5px';
+            
+            const trainingColorBox = document.createElement('span');
+            trainingColorBox.style.display = 'inline-block';
+            trainingColorBox.style.width = '15px';
+            trainingColorBox.style.height = '15px';
+            trainingColorBox.style.backgroundColor = '#FFC107';
+            trainingColorBox.style.marginRight = '5px';
+            trainingColorBox.style.borderRadius = '3px';
+            
+            const trainingLabel = document.createElement('span');
+            trainingLabel.textContent = `Training Data (${trainingCount})`;
+            trainingLabel.style.fontSize = '12px';
+            
+            trainingItem.appendChild(trainingColorBox);
+            trainingItem.appendChild(trainingLabel);
+            div.appendChild(trainingItem);
+            
+            // Add a separator
+            if (trainingCount > 0 && totalPredictions > 0) {
+                const separatorTrain = document.createElement('hr');
+                separatorTrain.style.margin = '10px 0';
+                separatorTrain.style.border = 'none';
+                separatorTrain.style.borderTop = '1px solid #eee';
+                div.appendChild(separatorTrain);
+            }
+            
+            // Only show test predictions if there are any
+            if (totalPredictions > 0) {
+                // Create legend items for correct predictions
+                const correctItem = document.createElement('div');
+                correctItem.style.display = 'flex';
+                correctItem.style.alignItems = 'center';
+                correctItem.style.marginBottom = '5px';
+                
+                const correctColorBox = document.createElement('span');
+                correctColorBox.style.display = 'inline-block';
+                correctColorBox.style.width = '15px';
+                correctColorBox.style.height = '15px';
+                correctColorBox.style.backgroundColor = '#4CAF50';
+                correctColorBox.style.marginRight = '5px';
+                correctColorBox.style.borderRadius = '3px';
+                
+                const correctLabel = document.createElement('span');
+                correctLabel.textContent = `Correct (${correctCount})`;
+                correctLabel.style.fontSize = '12px';
+                
+                correctItem.appendChild(correctColorBox);
+                correctItem.appendChild(correctLabel);
+                div.appendChild(correctItem);
+                
+                // Create legend items for incorrect predictions
+                const incorrectItem = document.createElement('div');
+                incorrectItem.style.display = 'flex';
+                incorrectItem.style.alignItems = 'center';
+                incorrectItem.style.marginBottom = '5px';
+                
+                const incorrectColorBox = document.createElement('span');
+                incorrectColorBox.style.display = 'inline-block';
+                incorrectColorBox.style.width = '15px';
+                incorrectColorBox.style.height = '15px';
+                incorrectColorBox.style.backgroundColor = '#F44336';
+                incorrectColorBox.style.marginRight = '5px';
+                incorrectColorBox.style.borderRadius = '3px';
+                
+                const incorrectLabel = document.createElement('span');
+                incorrectLabel.textContent = `Incorrect (${incorrectCount})`;
+                incorrectLabel.style.fontSize = '12px';
+                
+                incorrectItem.appendChild(incorrectColorBox);
+                incorrectItem.appendChild(incorrectLabel);
+                div.appendChild(incorrectItem);
+                
+                // Add accuracy information
+                const accuracy = (correctCount / totalPredictions * 100).toFixed(1);
+                
                 const separator = document.createElement('hr');
                 separator.style.margin = '10px 0';
                 separator.style.border = 'none';
                 separator.style.borderTop = '1px solid #eee';
                 div.appendChild(separator);
+                
+                const accuracyItem = document.createElement('div');
+                accuracyItem.style.fontSize = '13px';
+                accuracyItem.style.fontWeight = 'bold';
+                accuracyItem.textContent = `Test Accuracy: ${accuracy}%`;
+                div.appendChild(accuracyItem);
+                
+                // Add ratio information
+                const trainingRatio = (trainingCount / totalTrees * 100).toFixed(1);
+                const testRatio = (totalPredictions / totalTrees * 100).toFixed(1);
+                
+                const ratioItem = document.createElement('div');
+                ratioItem.style.fontSize = '12px';
+                ratioItem.style.marginTop = '5px';
+                ratioItem.textContent = `Train/Test: ${trainingRatio}% / ${testRatio}%`;
+                div.appendChild(ratioItem);
             }
+        } else {
+            // Regular species mode legend
+            // Collect species data
+            const speciesData = collectSpeciesData();
+            const speciesNames = Object.keys(speciesData).sort();
             
-            dynamicSpeciesNames.forEach(name => {
+            // Add title
+            div.innerHTML = '<div style="font-weight: bold; margin-bottom: 8px; font-size: 14px;">Tree Species</div>';
+            
+            // Add each species to the legend
+            speciesNames.forEach(name => {
+                const data = speciesData[name];
                 const item = document.createElement('div');
                 item.style.display = 'flex';
                 item.style.alignItems = 'center';
@@ -269,18 +517,55 @@ function createSpeciesLegend() {
                 colorBox.style.display = 'inline-block';
                 colorBox.style.width = '15px';
                 colorBox.style.height = '15px';
-                colorBox.style.backgroundColor = dynamicSpeciesColors[name];
+                colorBox.style.backgroundColor = data.color;
                 colorBox.style.marginRight = '5px';
                 colorBox.style.borderRadius = '3px';
                 
                 const nameSpan = document.createElement('span');
-                nameSpan.textContent = name;
+                nameSpan.textContent = `${name} (${data.count})`;
                 nameSpan.style.fontSize = '12px';
                 
                 item.appendChild(colorBox);
                 item.appendChild(nameSpan);
                 div.appendChild(item);
             });
+            
+            // Also add dynamically assigned colors
+            const dynamicSpeciesNames = Object.keys(dynamicSpeciesColors).filter(name => !speciesNames.includes(name)).sort();
+            
+            if (dynamicSpeciesNames.length > 0) {
+                // Add separator if we have both predefined and dynamic colors
+                if (speciesNames.length > 0) {
+                    const separator = document.createElement('hr');
+                    separator.style.margin = '10px 0';
+                    separator.style.border = 'none';
+                    separator.style.borderTop = '1px solid #eee';
+                    div.appendChild(separator);
+                }
+                
+                dynamicSpeciesNames.forEach(name => {
+                    const item = document.createElement('div');
+                    item.style.display = 'flex';
+                    item.style.alignItems = 'center';
+                    item.style.marginBottom = '5px';
+                    
+                    const colorBox = document.createElement('span');
+                    colorBox.style.display = 'inline-block';
+                    colorBox.style.width = '15px';
+                    colorBox.style.height = '15px';
+                    colorBox.style.backgroundColor = dynamicSpeciesColors[name];
+                    colorBox.style.marginRight = '5px';
+                    colorBox.style.borderRadius = '3px';
+                    
+                    const nameSpan = document.createElement('span');
+                    nameSpan.textContent = name;
+                    nameSpan.style.fontSize = '12px';
+                    
+                    item.appendChild(colorBox);
+                    item.appendChild(nameSpan);
+                    div.appendChild(item);
+                });
+            }
         }
         
         // Prevent click events from propagating to the map
@@ -291,6 +576,19 @@ function createSpeciesLegend() {
     
     // Add the legend to the map
     legendControl.addTo(map);
+}
+
+// Helper function to update the legend when switching between modes
+function updateLegendForPredictionMode() {
+    // Clear any existing dynamic species colors when switching modes
+    if (isPredictionMode) {
+        // Reset dynamic colors when entering prediction mode
+        dynamicSpeciesColors = {};
+        colorIndex = 0;
+    }
+    
+    // Recreate the legend with the appropriate mode
+    createSpeciesLegend();
 }
 
 /**
@@ -305,12 +603,19 @@ function setupEventListeners() {
         }, 300); // Delay matches typical CSS transition time.
     });
 
-    // Update existing filter checkboxes
+    // Enable prediction filters
     ['filterCorrect', 'filterIncorrect', 'filterTraining'].forEach(id => {
         const checkbox = document.getElementById(id);
         if (checkbox) {
-            checkbox.disabled = true;  // Disable these for now
-            checkbox.checked = true;   // Check them all visually
+            checkbox.disabled = false;  // Enable the checkboxes
+            checkbox.checked = true;    // Check them all by default
+            
+            // Add event listener for filter change
+            checkbox.addEventListener('change', () => {
+                if (isPredictionMode) {
+                    addTreesToMap();
+                }
+            });
         }
     });
     
@@ -331,6 +636,12 @@ function setupEventListeners() {
                 populateResultsTable();
                 addTreesToMap();
             });
+        }
+        
+        // Add prediction toggle switch
+        const predictionToggleElem = document.getElementById('predictionModeToggle');
+        if (predictionToggleElem) {
+            predictionToggleElem.addEventListener('change', togglePredictionMode);
         }
     }
 
@@ -572,6 +883,40 @@ function addTreesToMap() {
         });
     }
 
+    // Filter by prediction status if we're in prediction mode
+    if (isPredictionMode) {
+        // Get all data types to show based on filter checkboxes
+        const showCorrect = document.getElementById('filterCorrect').checked;
+        const showIncorrect = document.getElementById('filterIncorrect').checked;
+        const showTraining = document.getElementById('filterTraining').checked;
+        
+        // Only show trees that have predictions and match our filter settings
+        const beforeCount = dataToMap.length;
+        dataToMap = dataToMap.filter(tree => {
+            const treeId = tree.properties.tree_id.toString();
+            const treeData = predictionData.find(p => p.treeId === treeId);
+            
+            if (!treeData) return false; // No data for this tree
+            
+            if (treeData.isTraining) {
+                return showTraining; // Include if training filter is on
+            } else if (treeData.correct) {
+                return showCorrect; // Include if correct predictions filter is on
+            } else {
+                return showIncorrect; // Include if incorrect predictions filter is on
+            }
+        });
+        
+        console.log(`Filtered from ${beforeCount} to ${dataToMap.length} trees with predictions/training data`);
+        
+        if (dataToMap.length > 0) {
+            // Log a sample of tree IDs that were kept
+            console.log("Sample of kept tree IDs:", dataToMap.slice(0, 3).map(t => t.properties.tree_id));
+        } else {
+            console.warn("No trees match the current filters");
+        }
+    }
+
     console.log("Adding", dataToMap.length, "tree features to map");
     
     // Use standard GeoJSON handling with species-based styling
@@ -586,8 +931,8 @@ function addTreesToMap() {
                            feature.properties.ground_truth_species ||
                            'Unknown';
                            
-            // Get the appropriate color for this species
-            const speciesColor = getSpeciesColor(species);
+            // Get the appropriate color for this species, passing tree ID for prediction mode
+            const speciesColor = getSpeciesColor(species, feature.properties.tree_id);
             
             // Apply different styles based on geometry type
             if (feature.geometry.type.includes('Polygon')) {
@@ -644,7 +989,7 @@ function addTreesToMap() {
             // Create a styled popup with key information at the top
             let popupContent = `
                 <div style="min-width: 300px;">
-                    <div style="background-color: ${getSpeciesColor(species)}; color: white; padding: 10px; margin: -13px -19px 10px -19px; border-radius: 12px 12px 0 0;">
+                    <div style="background-color: ${getSpeciesColor(species, props.tree_id)}; color: white; padding: 10px; margin: -13px -19px 10px -19px; border-radius: 12px 12px 0 0;">
                         <h4 style="margin: 0; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);">Tree ${props.tree_id || 'ID Unknown'}</h4>
                         <div style="font-size: 14px; margin-top: 5px;">${species}</div>
                     </div>
@@ -670,10 +1015,64 @@ function addTreesToMap() {
                 </div>
             `;
             
+            // Add prediction information to popup if we're in prediction mode
+            if (isPredictionMode) {
+                const treeData = predictionData.find(p => p.treeId === props.tree_id.toString());
+                
+                if (treeData) {
+                    let predictionInfo = '';
+                    
+                    if (treeData.isTraining) {
+                        // Show training data info
+                        predictionInfo = `
+                            <div style="margin-top: 15px; padding: 10px; background-color: #f5f5f5; border-radius: 4px; border-left: 4px solid #FFC107">
+                                <h4 style="margin-top: 0; margin-bottom: 8px;">Training Data</h4>
+                                <strong>Species:</strong> ${treeData.actual}<br>
+                                <strong>Status:</strong> <span style="color:#FFC107; font-weight:bold;">Used for Training</span>
+                            </div>
+                        `;
+                    } else {
+                        // Show prediction result info
+                        const predictionStatus = treeData.correct ? 
+                            '<span style="color:#4CAF50; font-weight:bold;">✓ CORRECT</span>' : 
+                            '<span style="color:#F44336; font-weight:bold;">✗ INCORRECT</span>';
+                        
+                        predictionInfo = `
+                            <div style="margin-top: 15px; padding: 10px; background-color: #f5f5f5; border-radius: 4px; border-left: 4px solid ${treeData.correct ? '#4CAF50' : '#F44336'}">
+                                <h4 style="margin-top: 0; margin-bottom: 8px;">Prediction Result</h4>
+                                <strong>Actual:</strong> ${treeData.actual}<br>
+                                <strong>Predicted:</strong> ${treeData.predicted}<br>
+                                <strong>Status:</strong> ${predictionStatus}
+                            </div>
+                        `;
+                    }
+                    
+                    // Insert the info before the details section
+                    const detailsIndex = popupContent.indexOf('<details>');
+                    if (detailsIndex !== -1) {
+                        popupContent = popupContent.substring(0, detailsIndex) + 
+                            predictionInfo + 
+                            popupContent.substring(detailsIndex);
+                    } else {
+                        popupContent = popupContent.replace('</div>', predictionInfo + '</div>');
+                    }
+                }
+            }
+            
             layer.bindPopup(popupContent);
 
             // Add a tooltip with basic info that appears on hover
-            layer.bindTooltip(`Tree ${props.tree_id || 'Unknown'}: ${species}`, {
+            let tooltipContent = `Tree ${props.tree_id || 'Unknown'}: ${species}`;
+            
+            // Add prediction info to tooltip in prediction mode
+            if (isPredictionMode) {
+                const prediction = predictionData.find(p => p.treeId === props.tree_id.toString());
+                if (prediction) {
+                    tooltipContent = `Tree ${props.tree_id}: ${prediction.actual} → ${prediction.predicted} (${prediction.correct ? 'Correct' : 'Incorrect'})`;
+                }
+            }
+            
+            layer.bindTooltip(tooltipContent, {
                 direction: 'top',
                 sticky: true,
                 opacity: 0.9,
@@ -714,62 +1113,140 @@ function populateResultsTable() {
         return;
     }
     
-    // Update table headers - we need to adjust the HTML as well
-    const tableHeaders = document.querySelectorAll('#resultsTable th');
-    if (tableHeaders.length < 5) {
-        // We need to update the table headers in the DOM
-        const headerRow = document.querySelector('#resultsTable thead tr');
-        headerRow.innerHTML = `
+    // Update table headers based on mode
+    const tableHeaders = document.querySelector('#resultsTable thead tr');
+    
+    if (isPredictionMode) {
+        tableHeaders.innerHTML = `
+            <th data-sort="tree_id">ID</th>
+            <th data-sort="actual">Actual Species</th>
+            <th data-sort="predicted">Predicted Species</th>
+            <th data-sort="correct">Status</th>
+            <th>Action</th>
+        `;
+        
+        // Show the message in console for debugging
+        console.log("Switched to prediction mode headers");
+    } else {
+        tableHeaders.innerHTML = `
             <th data-sort="tree_id">ID</th>
             <th data-sort="Cmmn_Nm">Common Name</th>
             <th data-sort="Scntf_N">Scientific Name</th>
             <th data-sort="Family">Family</th>
             <th data-sort="specs_d">Diameter (cm)</th>
         `;
-    }
-
-    // Filter out trees with unknown common names first, if requested
-    const treesToShow = filteredData.filter(tree => {
-        const props = tree.properties;
-        const commonName = props.Cmmn_Nm || props.cmmn_nm;
         
-        // Keep trees that have a common name or all trees if filter is off
-        return commonName || !document.getElementById('filterUnknownSpecies')?.checked;
-    });
-    
-    // Sort by common name by default for first load if not already sorted
-    if (!currentSortColumn) {
-        treesToShow.sort((a, b) => {
-            const nameA = a.properties.Cmmn_Nm || a.properties.cmmn_nm || 'Unknown';
-            const nameB = b.properties.Cmmn_Nm || b.properties.cmmn_nm || 'Unknown';
-            return nameA.localeCompare(nameB);
-        });
+        // Show the message in console for debugging
+        console.log("Switched to regular mode headers");
     }
 
-    // Populate the table with enhanced tree data
+    // Filter trees based on mode
+    let treesToShow = [];
+    
+    if (isPredictionMode) {
+        // In prediction mode, only show trees that have prediction data
+        const predictionTreeIds = new Set(predictionData.map(p => p.treeId));
+        
+        treesToShow = filteredData.filter(tree => 
+            predictionTreeIds.has(tree.properties.tree_id.toString())
+        );
+    } else {
+        // In regular mode, filter out trees with unknown common names if requested
+        treesToShow = filteredData.filter(tree => {
+            const props = tree.properties;
+            const commonName = props.Cmmn_Nm || props.cmmn_nm;
+            
+            // Keep trees that have a common name or all trees if filter is off
+            return commonName || !document.getElementById('filterUnknownSpecies')?.checked;
+        });
+        
+        // Sort by common name by default for first load if not already sorted
+        if (!currentSortColumn) {
+            treesToShow.sort((a, b) => {
+                const nameA = a.properties.Cmmn_Nm || a.properties.cmmn_nm || 'Unknown';
+                const nameB = b.properties.Cmmn_Nm || b.properties.cmmn_nm || 'Unknown';
+                return nameA.localeCompare(nameB);
+            });
+        }
+    }
+
+    // Populate the table based on mode
     treesToShow.forEach(tree => {
         const props = tree.properties;
-        const commonName = props.Cmmn_Nm || props.cmmn_nm || 'Unknown';
-        const scientificName = props.Scntf_N || props.scntf_n || '-';
-        const family = props.Family || props.family || '-';
-        const diameter = props.specs_d || props.diameter || '-';
-        const color = getSpeciesColor(commonName);
-        
+        const treeId = props.tree_id;
         const row = document.createElement('tr');
-        row.dataset.treeId = props.tree_id;
-        row.innerHTML = `
-            <td>${props.tree_id}</td>
-            <td>
-                <div style="display:flex; align-items:center;">
-                    <span style="display:inline-block; width:12px; height:12px; background-color:${color}; 
-                           border-radius:3px; margin-right:6px;"></span>
-                    ${commonName}
-                </div>
-            </td>
-            <td><em>${scientificName}</em></td>
-            <td>${family}</td>
-            <td>${diameter}</td>
-        `;
+        row.dataset.treeId = treeId;
+        
+        if (isPredictionMode) {
+            // Find prediction for this tree
+            const treeIdStr = treeId.toString();
+            const treeData = predictionData.find(p => p.treeId === treeIdStr);
+            
+            if (treeData) {
+                if (treeData.isTraining) {
+                    // Display training data differently
+                    row.innerHTML = `
+                    <td>${treeId}</td>
+                    <td>${treeData.actual}</td>
+                    <td>N/A</td>
+                    <td>
+                        <span style="color:#FFC107; font-weight:bold;">
+                            TRAINING
+                        </span>
+                    </td>
+                    <td>
+                        <button class="view-tree-btn" data-tree-id="${treeId}">View</button>
+                    </td>
+                `;
+                    
+                    // Add training data highlighting
+                    row.style.backgroundColor = 'rgba(255, 193, 7, 0.05)';
+                } else {
+                    // Regular prediction data
+                    const statusColor = treeData.correct ? '#4CAF50' : '#F44336';
+                    const statusText = treeData.correct ? 'CORRECT' : 'INCORRECT';
+                    console.log(`Table row: Tree ${treeIdStr} found in predictions, status: ${statusText}`);
+                    
+                    row.innerHTML = `
+                    <td>${treeId}</td>
+                    <td>${treeData.actual}</td>
+                    <td>${treeData.predicted}</td>
+                    <td>
+                        <span style="color:${statusColor}; font-weight:bold;">
+                            ${treeData.correct ? '✓' : '✗'} ${statusText}
+                        </span>
+                    </td>
+                    <td>
+                        <button class="view-tree-btn" data-tree-id="${treeId}">View</button>
+                    </td>
+                `;
+                    
+                    // Add highlighting based on correctness
+                    row.style.backgroundColor = treeData.correct ? 'rgba(76, 175, 80, 0.05)' : 'rgba(244, 67, 54, 0.05)';
+                }
+            }
+        } else {
+            // Regular mode display
+            const commonName = props.Cmmn_Nm || props.cmmn_nm || 'Unknown';
+            const scientificName = props.Scntf_N || props.scntf_n || '-';
+            const family = props.Family || props.family || '-';
+            const diameter = props.specs_d || props.diameter || '-';
+            const color = getSpeciesColor(commonName);
+            
+            row.innerHTML = `
+                <td>${treeId}</td>
+                <td>
+                    <div style="display:flex; align-items:center;">
+                        <span style="display:inline-block; width:12px; height:12px; background-color:${color}; 
+                               border-radius:3px; margin-right:6px;"></span>
+                        ${commonName}
+                    </div>
+                </td>
+                <td><em>${scientificName}</em></td>
+                <td>${family}</td>
+                <td>${diameter}</td>
+            `;
+        }
         
         row.style.cursor = 'pointer';
         row.addEventListener('click', () => {
@@ -788,6 +1265,28 @@ function populateResultsTable() {
         
         tableBody.appendChild(row);
     });
+    
+    // Add event listeners to view buttons if in prediction mode
+    if (isPredictionMode) {
+        document.querySelectorAll('.view-tree-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation(); // Prevent row click
+                const treeId = btn.getAttribute('data-tree-id');
+                
+                // Find and zoom to the tree
+                const geoJsonLayer = treeLayers.getLayers()[0];
+                if (geoJsonLayer && geoJsonLayer.getLayers) {
+                    const treeLayer = geoJsonLayer.getLayers().find(
+                        layer => layer.feature.properties.tree_id === treeId
+                    );
+                    if (treeLayer) {
+                        map.fitBounds(treeLayer.getBounds().pad(0.1));
+                        treeLayer.openPopup();
+                    }
+                }
+            });
+        });
+    }
     
     // Update the status to show how many trees are displayed
     updateDataStatus(`Showing ${treesToShow.length} of ${originalTreeData.length} trees`);
@@ -898,196 +1397,6 @@ function renderPerClassMetrics() { /* Stub */ }
 function hideLoadingIndicator() {
     const loadingIndicator = document.getElementById('loadingIndicator');
     if(loadingIndicator) loadingIndicator.classList.add('hidden');
-}
-
-/**
- * Adds measurement tools to the map
- */
-function addMeasurementTools() {
-    // Create measurement control elements
-    const measureControl = L.control({ position: 'topleft' });
-    
-    measureControl.onAdd = function() {
-        const container = L.DomUtil.create('div', 'leaflet-bar leaflet-control');
-        container.style.backgroundColor = 'white';
-        container.style.padding = '5px';
-        container.style.borderRadius = '4px';
-        container.style.boxShadow = '0 1px 5px rgba(0,0,0,0.4)';
-        
-        // Create measurement buttons
-        const distanceBtn = L.DomUtil.create('button', '', container);
-        distanceBtn.innerHTML = '📏';
-        distanceBtn.title = 'Measure Distance';
-        distanceBtn.style.display = 'block';
-        distanceBtn.style.margin = '5px 0';
-        distanceBtn.style.padding = '5px 10px';
-        distanceBtn.style.cursor = 'pointer';
-        distanceBtn.style.border = '1px solid #ccc';
-        distanceBtn.style.borderRadius = '4px';
-        distanceBtn.style.backgroundColor = '#fff';
-        
-        const areaBtn = L.DomUtil.create('button', '', container);
-        areaBtn.innerHTML = '🔲';
-        areaBtn.title = 'Measure Area';
-        areaBtn.style.display = 'block';
-        areaBtn.style.margin = '5px 0';
-        areaBtn.style.padding = '5px 10px';
-        areaBtn.style.cursor = 'pointer';
-        areaBtn.style.border = '1px solid #ccc';
-        areaBtn.style.borderRadius = '4px';
-        areaBtn.style.backgroundColor = '#fff';
-        
-        const clearBtn = L.DomUtil.create('button', '', container);
-        clearBtn.innerHTML = '🗑️';
-        clearBtn.title = 'Clear Measurements';
-        clearBtn.style.display = 'block';
-        clearBtn.style.margin = '5px 0';
-        clearBtn.style.padding = '5px 10px';
-        clearBtn.style.cursor = 'pointer';
-        clearBtn.style.border = '1px solid #ccc';
-        clearBtn.style.borderRadius = '4px';
-        clearBtn.style.backgroundColor = '#fff';
-        
-        // Variables to track measurement state
-        let measurementLayer = L.layerGroup().addTo(map);
-        let measuring = false;
-        let measurePoints = [];
-        let polyline = null;
-        let measureType = null;
-        
-        // Prevent map clicks when interacting with control
-        L.DomEvent.disableClickPropagation(container);
-        
-        // Distance measurement handler
-        distanceBtn.addEventListener('click', function() {
-            clearMeasurements();
-            measuring = true;
-            measureType = 'distance';
-            measurePoints = [];
-            map.getContainer().style.cursor = 'crosshair';
-            updateStatus('Click on the map to start measuring distance');
-        });
-        
-        // Area measurement handler
-        areaBtn.addEventListener('click', function() {
-            clearMeasurements();
-            measuring = true;
-            measureType = 'area';
-            measurePoints = [];
-            map.getContainer().style.cursor = 'crosshair';
-            updateStatus('Click on the map to start drawing area polygon');
-        });
-        
-        // Clear measurements handler
-        clearBtn.addEventListener('click', clearMeasurements);
-        
-        // Map click handler for measurements
-        map.on('click', function(e) {
-            if (!measuring) return;
-            
-            measurePoints.push(e.latlng);
-            
-            // Create marker at clicked point
-            L.circleMarker(e.latlng, {
-                color: '#ff4500',
-                radius: 5,
-                weight: 2,
-                fillColor: '#fff',
-                fillOpacity: 1
-            }).addTo(measurementLayer);
-            
-            if (measureType === 'distance') {
-                // Update the distance line
-                if (polyline) {
-                    measurementLayer.removeLayer(polyline);
-                }
-                
-                if (measurePoints.length > 1) {
-                    polyline = L.polyline(measurePoints, {
-                        color: '#ff4500',
-                        weight: 3,
-                        dashArray: '5, 10'
-                    }).addTo(measurementLayer);
-                    
-                    // Calculate total distance
-                    let totalDistance = 0;
-                    for (let i = 1; i < measurePoints.length; i++) {
-                        totalDistance += measurePoints[i-1].distanceTo(measurePoints[i]);
-                    }
-                    
-                    // Display distance
-                    const midPoint = measurePoints[measurePoints.length - 1];
-                    let distText = totalDistance < 1000 ? 
-                        `${totalDistance.toFixed(2)} meters` : 
-                        `${(totalDistance / 1000).toFixed(3)} kilometers`;
-                        
-                    L.marker(midPoint, {
-                        icon: L.divIcon({
-                            className: 'distance-label',
-                            html: `<div style="background: rgba(255,69,0,0.8); color: white; padding: 3px 6px; border-radius: 3px;">${distText}</div>`,
-                            iconSize: [100, 40]
-                        })
-                    }).addTo(measurementLayer);
-                }
-            } else if (measureType === 'area' && measurePoints.length > 2) {
-                // Update the area polygon
-                if (polyline) {
-                    measurementLayer.removeLayer(polyline);
-                }
-                
-                polyline = L.polygon(measurePoints, {
-                    color: '#ff4500',
-                    weight: 2,
-                    fillColor: '#ff4500',
-                    fillOpacity: 0.2
-                }).addTo(measurementLayer);
-                
-                // Calculate area
-                const area = L.GeometryUtil.geodesicArea(measurePoints);
-                let areaText = '';
-                
-                if (area < 10000) {
-                    // Show in square meters
-                    areaText = `${area.toFixed(2)} m²`;
-                } else {
-                    // Show in hectares
-                    areaText = `${(area / 10000).toFixed(4)} ha`;
-                }
-                
-                // Find center of polygon
-                const bounds = L.latLngBounds(measurePoints);
-                const center = bounds.getCenter();
-                
-                // Display area label
-                L.marker(center, {
-                    icon: L.divIcon({
-                        className: 'area-label',
-                        html: `<div style="background: rgba(255,69,0,0.8); color: white; padding: 3px 6px; border-radius: 3px;">${areaText}</div>`,
-                        iconSize: [100, 40]
-                    })
-                }).addTo(measurementLayer);
-            }
-        });
-        
-        // Helper to reset measurements
-        function clearMeasurements() {
-            measuring = false;
-            measurePoints = [];
-            measurementLayer.clearLayers();
-            map.getContainer().style.cursor = '';
-            updateStatus('');
-        }
-        
-        // Helper to show status
-        function updateStatus(message) {
-            // You could create a status div for this, or use your existing status element
-            updateDataStatus(message);
-        }
-        
-        return container;
-    };
-    
-    measureControl.addTo(map);
 }
 
 function updateDataStatus(message) { document.getElementById('dataStatus').textContent = message; }

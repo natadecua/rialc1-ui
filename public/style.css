@@ -50,12 +50,14 @@ body {
 /* Map Controls */
 .map-controls {
     position: absolute;
-    top: 20px;
+    top: 80px; /* Move down to avoid blocking zoom controls */
     left: 20px;
-    z-index: 1000;
+    z-index: 999; /* Lower z-index than Leaflet controls (which are 1000) */
     display: flex;
     flex-direction: column;
     gap: 15px;
+    max-height: calc(100% - 100px);
+    overflow-y: auto;
 }
 
 .legend, .filter-controls {
@@ -110,6 +112,85 @@ body {
 .filter-controls input[type="checkbox"] {
     margin-right: 8px;
     transform: scale(1.1);
+}
+
+/* Display Mode Toggle */
+.display-mode-toggle {
+    margin-bottom: 15px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #ddd;
+}
+
+.toggle-switch-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: 8px;
+}
+
+.toggle-label {
+    font-size: 0.9rem;
+    flex: 1;
+    text-align: center;
+}
+
+.toggle-switch {
+    position: relative;
+    display: inline-block;
+    width: 50px;
+    height: 24px;
+    margin: 0 10px;
+}
+
+.toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #ccc;
+    transition: .4s;
+    border-radius: 34px;
+}
+
+.toggle-slider:before {
+    position: absolute;
+    content: "";
+    height: 18px;
+    width: 18px;
+    left: 3px;
+    bottom: 3px;
+    background-color: white;
+    transition: .4s;
+    border-radius: 50%;
+}
+
+input:checked + .toggle-slider {
+    background-color: #2196F3;
+}
+
+input:checked + .toggle-slider:before {
+    transform: translateX(26px);
+}
+
+/* Prediction Legend Colors */
+.legend-color.correct-prediction {
+    background-color: #28a745;
+}
+
+.legend-color.incorrect-prediction {
+    background-color: #dc3545;
+}
+
+.legend-color.training-data {
+    background-color: #ffc107;
 }
 
 /* Side Panel */
