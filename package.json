@@ -17,6 +17,7 @@
   "license": "ISC",
   "dependencies": {
     "cors": "^2.8.5",
-    "express": "^4.19.2"
+    "express": "^4.19.2",
+    "shapefile": "^0.6.6"
   }
 }

@@ -91,6 +91,11 @@
                             <input type="checkbox" id="filterTraining" checked>
                             Show Training Trees
                         </label>
+                        <div style="margin-top: 10px;">
+                            <button id="showGroupInfoBtn" style="padding: 5px 10px; background: #4CAF50; color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 12px; width: 100%;">
+                                View Tree Group Information
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -193,6 +198,34 @@
     <div id="loadingIndicator" class="loading">
         <div class="spinner"></div>
         <p>Loading La Mesa Ecopark data...</p>
+    </div>
+    
+    <!-- Tree Group Information Modal -->
+    <div id="groupInfoModal" style="display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.7);">
+        <div style="background-color: white; margin: 10% auto; padding: 20px; width: 80%; max-width: 800px; max-height: 80vh; overflow-y: auto; border-radius: 5px;">
+            <span id="closeGroupModal" style="color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer;">&times;</span>
+            <h2 style="margin-top: 0;">Tree Group Information</h2>
+            <p>Trees in the La Mesa Eco Park were classified into five (5) taxonomic groups:</p>
+            
+            <h3>Group 1: Rosids (544 trees)</h3>
+            <p>Includes species like Samanea saman (Rain Tree), Swietenia mahagoni (Mahogany), Pterocarpus indicus (Narra), and many others.</p>
+            
+            <h3>Group 2: Basals (155 trees)</h3>
+            <p>Includes species like Macaranga tanarius, Chrysophyllum cainito, and Terminalia catappa.</p>
+            
+            <h3>Group 3: Asterids (166 trees)</h3>
+            <p>Includes species like Tectona grandis (Teak), Gmelina arborea (Yemane), and Vitex parviflora.</p>
+            
+            <h3>Group 4: Monocots (77 trees)</h3>
+            <p>Includes various palm species like Adonidia merrillii and other monocotyledon plants.</p>
+            
+            <h3>Group 5: Others (109 trees)</h3>
+            <p>Species that don't fit into the other taxonomic groups.</p>
+            
+            <div style="margin-top: 20px;">
+                <button id="closeModalBtn" style="padding: 8px 15px; background-color: #4CAF50; color: white; border: none; border-radius: 3px; cursor: pointer;">Close</button>
+            </div>
+        </div>
     </div>
     
     <!-- Your custom script is now the only one at the bottom -->

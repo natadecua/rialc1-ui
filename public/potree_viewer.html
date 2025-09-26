@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="description" content="La Mesa Ecopark - Tree Segmentation Viewer">
+	<meta name="author" content="">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+	<title>Potree Viewer - La Mesa Ecopark</title>
+
+	<link rel="stylesheet" type="text/css" href="/Potree_1.8.2/build/potree/potree.css">
+	<link rel="stylesheet" type="text/css" href="/Potree_1.8.2/libs/jquery-ui/jquery-ui.min.css">
+	<link rel="stylesheet" type="text/css" href="/Potree_1.8.2/libs/openlayers3/ol.css">
+	<link rel="stylesheet" type="text/css" href="/Potree_1.8.2/libs/spectrum/spectrum.css">
+	<link rel="stylesheet" type="text/css" href="/Potree_1.8.2/libs/jstree/themes/mixed/style.css">
+	
+	<style>
+		/* Add custom styles for the UI here */
+		body {
+			margin: 0;
+			padding: 0;
+		}
+
+		#potree_container {
+			position: absolute;
+			width: 100%;
+			height: 100%;
+			left: 0;
+			top: 0;
+		}
+		
+		#potree_render_area {
+			width: 100%;
+			height: 100%;
+		}
+		
+		.potree-panel {
+			position: absolute;
+			top: 10px;
+			right: 10px; /* Changed from left to right */
+			background-color: rgba(255, 255, 255, 0.8);
+			padding: 10px;
+			border-radius: 5px;
+			box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+			z-index: 1000;
+			display: flex;
+			flex-direction: column;
+		}
+		
+		.potree-panel label {
+			display: block;
+			margin-bottom: 5px;
+		}
+		
+		.potree-panel h3 {
+			margin-top: 0;
+			margin-bottom: 10px;
+			font-size: 1em;
+		}
+		
+		/* Styling for checkboxes */
+		.checkbox-container {
+			margin: 5px 0;
+			display: flex;
+			align-items: center;
+		}
+		
+		.checkbox-container input[type="checkbox"] {
+			margin-right: 8px;
+		}
+		
+		/* Color indicators */
+		.color-indicator {
+			display: inline-block;
+			width: 12px;
+			height: 12px;
+			margin-right: 5px;
+			border: 1px solid #aaa;
+		}
+		
+		.color-correct {
+			background-color: #4CAF50; /* Green */
+		}
+		
+		.color-incorrect {
+			background-color: #F44336; /* Red */
+		}
+		
+		.color-training {
+			background-color: #FFC107; /* Amber */
+		}
+	</style>
+</head>
+
+<body>
+	<script src="/Potree_1.8.2/libs/jquery/jquery-3.1.1.min.js"></script>
+	<script src="/Potree_1.8.2/libs/spectrum/spectrum.js"></script>
+	<script src="/Potree_1.8.2/libs/jquery-ui/jquery-ui.min.js"></script>
+	<script src="/Potree_1.8.2/libs/other/BinaryHeap.js"></script>
+	<script src="/Potree_1.8.2/libs/tween/tween.min.js"></script>
+	<script src="/Potree_1.8.2/libs/d3/d3.js"></script>
+	<script src="/Potree_1.8.2/libs/proj4/proj4.js"></script>
+	<script src="/Potree_1.8.2/libs/openlayers3/ol.js"></script>
+	<script src="/Potree_1.8.2/libs/i18next/i18next.js"></script>
+	<script src="/Potree_1.8.2/libs/jstree/jstree.js"></script>
+	<script src="/Potree_1.8.2/libs/copc/index.js"></script>
+	<script src="/Potree_1.8.2/build/potree/potree.js"></script>
+	<script src="/Potree_1.8.2/libs/plasio/js/laslaz.js"></script>
+	<script src="/Potree_1.8.2/libs/shapefile/shapefile.js"></script>
+	
+	<div id="potree_container">
+		<div id="potree_render_area"></div>
+		<div id="potree_sidebar_container"></div>
+	</div>
+	
+	<!-- Custom UI overlay for prediction controls -->
+	<div class="potree-panel">
+		<h3>Tree Predictions</h3>
+		<div class="checkbox-container">
+			<input type="checkbox" id="showCorrect" checked>
+			<span class="color-indicator color-correct"></span>
+			<label for="showCorrect">Correct Predictions</label>
+		</div>
+		<div class="checkbox-container">
+			<input type="checkbox" id="showIncorrect" checked>
+			<span class="color-indicator color-incorrect"></span>
+			<label for="showIncorrect">Incorrect Predictions</label>
+		</div>
+		<div class="checkbox-container">
+			<input type="checkbox" id="showTraining" checked>
+			<span class="color-indicator color-training"></span>
+			<label for="showTraining">Training Data</label>
+		</div>
+		
+		<hr style="margin: 10px 0; border: 0; border-top: 1px solid #ccc;">
+		
+		<div class="checkbox-container">
+			<input type="checkbox" id="showOriginal" checked>
+			<span class="color-indicator" style="background-color: blue;"></span>
+			<label for="showOriginal">All Crowns (Debug)</label>
+		</div>
+		
+		<div style="margin-top: 10px; font-size: 0.9em; color: #666;">
+			<p>If shapefiles aren't visible, try adjusting your view or click "View All" below.</p>
+			<button style="margin-top: 5px; padding: 5px;" onclick="resetView()">View All</button>
+		</div>
+	</div>
+	
+	<script type="module">
+		import * as THREE from "/Potree_1.8.2/libs/three.js/build/three.module.js";
+	
+		// Initialize the viewer
+		window.viewer = new Potree.Viewer(document.getElementById("potree_render_area"));
+		
+		// Configure viewer settings
+		viewer.setEDLEnabled(true); // Eye-Dome Lighting helps with depth perception
+		viewer.setFOV(60);
+		viewer.setPointBudget(2_500_000); // Adjust as needed for performance
+		viewer.loadSettingsFromURL();
+		
+		viewer.setDescription('La Mesa Ecopark Tree Classification');
+		
+		// Load the GUI
+		viewer.loadGUI(() => {
+			viewer.setLanguage('en');
+			$("#menu_tools").next().show();
+			$("#menu_scene").next().show();
+			viewer.toggleSidebar();
+		});
+		
+		// Object to store shape references
+		window.shapefiles = {
+			correct: null,
+			incorrect: null,
+			training: null
+		};
+		
+		// Function to load point cloud with cascading fallback
+		async function loadPointCloud() {
+			console.log("Attempting to load point cloud...");
+			
+			try {
+				// Try COPC format first
+				console.log("Trying COPC format: /raw_data/lamesa_processed.copc.laz");
+				await Potree.loadPointCloud(
+					"/raw_data/lamesa_processed.copc.laz",
+					"La Mesa Forest", 
+					async e => {
+						console.log("COPC loaded successfully");
+						let scene = viewer.scene;
+						let pointcloud = e.pointcloud;
+						let material = pointcloud.material;
+						scene.addPointCloud(pointcloud);
+						
+						material.pointSizeType = Potree.PointSizeType.ADAPTIVE;
+						material.size = 1.0;
+						material.activeAttributeName = "rgba"; // Or "intensity" if you prefer
+						
+						// Set initial camera position (update these to match your data)
+						scene.view.position.set(507844.7, 1627083.5, 332.9);
+						scene.view.lookAt(new THREE.Vector3(507474.9, 1627448.9, -15.1));
+						
+						// Load shapefiles with different filtering and colors
+						await loadShapefiles();
+						
+						// Set up UI event listeners
+						setupUIEventListeners();
+					}
+				);
+			} catch (err) {
+				console.error("Failed to load COPC:", err);
+				
+				try {
+					// Try Potree converted format as fallback
+					console.log("Trying Potree format: /raw_data/modified_merged_converted/metadata.json");
+					await Potree.loadPointCloud(
+						"/raw_data/modified_merged_converted/metadata.json",
+						"La Mesa Forest", 
+						async e => {
+							console.log("Potree format loaded successfully");
+							let scene = viewer.scene;
+							let pointcloud = e.pointcloud;
+							let material = pointcloud.material;
+							scene.addPointCloud(pointcloud);
+							
+							material.pointSizeType = Potree.PointSizeType.ADAPTIVE;
+							material.size = 1.0;
+							material.activeAttributeName = "rgba"; // Or "intensity" if you prefer
+							
+							// Set initial camera position (update these to match your data)
+							scene.view.position.set(507844.7, 1627083.5, 332.9);
+							scene.view.lookAt(new THREE.Vector3(507474.9, 1627448.9, -15.1));
+							
+							// Load shapefiles with different filtering and colors
+							await loadShapefiles();
+							
+							// Set up UI event listeners
+							setupUIEventListeners();
+						}
+					);
+				} catch (err2) {
+					console.error("Failed to load Potree format:", err2);
+					
+					try {
+						// Try LAS format as final fallback
+						console.log("Trying LAS format: /raw_data/lamesa_processed.las");
+						await Potree.loadPointCloud(
+							"/raw_data/lamesa_processed.las",
+							"La Mesa Forest", 
+							async e => {
+								console.log("LAS format loaded successfully");
+								let scene = viewer.scene;
+								let pointcloud = e.pointcloud;
+								let material = pointcloud.material;
+								scene.addPointCloud(pointcloud);
+								
+								material.pointSizeType = Potree.PointSizeType.ADAPTIVE;
+								material.size = 1.0;
+								material.activeAttributeName = "rgba"; // Or "intensity" if you prefer
+								
+								// Set initial camera position (update these to match your data)
+								scene.view.position.set(507844.7, 1627083.5, 332.9);
+								scene.view.lookAt(new THREE.Vector3(507474.9, 1627448.9, -15.1));
+								
+								// Load shapefiles with different filtering and colors
+								await loadShapefiles();
+								
+								// Set up UI event listeners
+								setupUIEventListeners();
+							}
+						);
+					} catch (err3) {
+						console.error("All point cloud loading attempts failed:", err3);
+						alert("Failed to load point cloud data. Please check the console for more information.");
+					}
+				}
+			}
+		}
+		
+		// Start loading process
+		loadPointCloud();
+		
+		// Function to load shapefiles
+		async function loadShapefiles() {
+			try {
+				console.log("Starting shapefile loading...");
+				
+				// Get the projection from the point cloud - critical for proper alignment
+				let pointcloudProjection = viewer.scene.pointclouds[0].projection;
+				console.log("Point cloud projection:", pointcloudProjection);
+				
+				// Define coordinate transformations
+				proj4.defs("WGS84", "+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs");
+				
+				// Use the point cloud's projection if available, otherwise use our UTM zone 51 estimate
+				if (pointcloudProjection && pointcloudProjection.trim() !== "") {
+					proj4.defs("pointcloud", pointcloudProjection);
+					console.log("Using point cloud's projection");
+				} else {
+					proj4.defs("pointcloud", "+proj=utm +zone=51 +datum=WGS84 +units=m +no_defs");
+					console.log("Using fallback UTM Zone 51 projection");
+				}
+				
+				let transform = proj4("WGS84", "pointcloud");
+				console.log("Transform function created:", transform);
+				
+				const loader = new Potree.ShapefileLoader();
+				loader.transform = transform;
+				
+				// Add debugging for the ShapefileLoader
+				console.log("ShapefileLoader instance:", loader);
+				
+				// Create a parent node to hold all shapefile objects
+				const shapeNode = new THREE.Object3D();
+				shapeNode.name = "Tree Classifications";
+				viewer.scene.scene.add(shapeNode);
+				
+				// Following the approach in the example file
+				try {
+					console.log("Loading shapefiles using the same approach as the examples...");
+					
+					// First try to load the correct/incorrect/training shapefile
+					let shpCorrect, shpIncorrect, shpTraining;
+					
+					try {
+						// Try loading the mcws_crowns_newclass.shp file first
+						console.log("Attempting to load mcws_crowns_newclass.shp");
+						shpCorrect = await loader.load("/raw_data/shapefiles/mcws_crowns_newclass.shp");
+						console.log("Successfully loaded mcws_crowns_newclass.shp:", shpCorrect);
+						
+						// If successful, clone it for the other categories
+						shpIncorrect = { node: shpCorrect.node.clone() };
+						shpTraining = { node: shpCorrect.node.clone() };
+					} catch (error) {
+						console.error("Failed to load mcws_crowns_newclass.shp:", error);
+						
+						// Try the mcws_crowns.shp file as fallback
+						try {
+							console.log("Attempting to load mcws_crowns.shp");
+							shpCorrect = await loader.load("/raw_data/crown_shp/mcws_crowns.shp");
+							console.log("Successfully loaded mcws_crowns.shp:", shpCorrect);
+							
+							// If successful, clone it for the other categories
+							shpIncorrect = { node: shpCorrect.node.clone() };
+							shpTraining = { node: shpCorrect.node.clone() };
+						} catch (fallbackError) {
+							console.error("Failed to load mcws_crowns.shp:", fallbackError);
+							alert("Could not load any tree crown shapefiles. Please check the console for details.");
+							return;
+						}
+					}
+					
+					// Add each shapefile to the scene and color them differently
+					
+					// First: Correct predictions (Green)
+					shapeNode.add(shpCorrect.node);
+					shpCorrect.node.traverse(node => {
+						if (node.material) {
+							node.material.color.setRGB(0, 1, 0); // Green
+							node.material.opacity = 0.8;
+							node.material.transparent = true;
+							node.material.side = THREE.DoubleSide;
+							node.material.linewidth = 2; // For line geometries
+						}
+					});
+					
+					// Second: Incorrect predictions (Red)
+					shapeNode.add(shpIncorrect.node);
+					shpIncorrect.node.traverse(node => {
+						if (node.material) {
+							node.material.color.setRGB(1, 0, 0); // Red
+							node.material.opacity = 0.8;
+							node.material.transparent = true;
+							node.material.side = THREE.DoubleSide;
+							node.material.linewidth = 2;
+						}
+					});
+					
+					// Third: Training data (Amber/Yellow)
+					shapeNode.add(shpTraining.node);
+					shpTraining.node.traverse(node => {
+						if (node.material) {
+							node.material.color.setRGB(1, 0.75, 0); // Amber
+							node.material.opacity = 0.8;
+							node.material.transparent = true;
+							node.material.side = THREE.DoubleSide;
+							node.material.linewidth = 2;
+						}
+					});
+					
+					// This is important to ensure fat lines are properly sized
+					viewer.addEventListener("update", () => {
+						const size = viewer.renderer.getSize(new THREE.Vector2());
+						
+						if (shpCorrect && shpCorrect.setResolution) {
+							shpCorrect.setResolution(size.width, size.height);
+						}
+						
+						if (shpIncorrect && shpIncorrect.setResolution) {
+							shpIncorrect.setResolution(size.width, size.height);
+						}
+						
+						if (shpTraining && shpTraining.setResolution) {
+							shpTraining.setResolution(size.width, size.height);
+						}
+					});
+					
+					// Store references for UI controls
+					window.shapefiles.correct = shpCorrect.node;
+					window.shapefiles.incorrect = shpIncorrect.node;
+					window.shapefiles.training = shpTraining.node;
+					// There's no "original" in this approach, so we'll use the first one
+					window.shapefiles.original = shpCorrect.node;
+					
+					// Ensure line widths are rendered correctly
+					viewer.addEventListener("update", () => {
+						const size = viewer.renderer.getSize(new THREE.Vector2());
+						if (shpAll && shpAll.setResolution) {
+							shpAll.setResolution(size.width, size.height);
+						}
+					});
+					
+					// Add to sidebar
+					viewer.onGUILoaded(() => {
+						let tree = $(`#jstree_scene`);
+						let parentNode = "other";
+						
+						// Add the shapefile nodes to the sidebar
+						let correctID = tree.jstree('create_node', parentNode, { 
+							"text": "Correct Predictions", 
+							"icon": `${Potree.resourcePath}/icons/triangle.svg`,
+							"object": window.shapefiles.correct,
+							"data": window.shapefiles.correct,
+						}, "last", false, false);
+						tree.jstree(window.shapefiles.correct.visible ? "check_node" : "uncheck_node", correctID);
+						
+						let incorrectID = tree.jstree('create_node', parentNode, { 
+							"text": "Incorrect Predictions", 
+							"icon": `${Potree.resourcePath}/icons/triangle.svg`,
+							"object": window.shapefiles.incorrect,
+							"data": window.shapefiles.incorrect,
+						}, "last", false, false);
+						tree.jstree(window.shapefiles.incorrect.visible ? "check_node" : "uncheck_node", incorrectID);
+						
+						let trainingID = tree.jstree('create_node', parentNode, { 
+							"text": "Training Data", 
+							"icon": `${Potree.resourcePath}/icons/triangle.svg`,
+							"object": window.shapefiles.training,
+							"data": window.shapefiles.training,
+						}, "last", false, false);
+						tree.jstree(window.shapefiles.training.visible ? "check_node" : "uncheck_node", trainingID);
+					});
+					
+				} catch (error) {
+					console.error("Error loading prediction results or shapefile:", error);
+				}
+				
+			} catch (error) {
+				console.error("Error loading shapefiles:", error);
+			}
+		}
+		
+		// Set up event listeners for the custom UI
+		function setupUIEventListeners() {
+			document.getElementById('showCorrect').addEventListener('change', function(e) {
+				if (window.shapefiles.correct) {
+					window.shapefiles.correct.visible = e.target.checked;
+				}
+			});
+			
+			document.getElementById('showIncorrect').addEventListener('change', function(e) {
+				if (window.shapefiles.incorrect) {
+					window.shapefiles.incorrect.visible = e.target.checked;
+				}
+			});
+			
+			document.getElementById('showTraining').addEventListener('change', function(e) {
+				if (window.shapefiles.training) {
+					window.shapefiles.training.visible = e.target.checked;
+				}
+			});
+			
+			// Debug toggle for showing all crowns
+			document.getElementById('showOriginal').addEventListener('change', function(e) {
+				if (window.shapefiles.original) {
+					window.shapefiles.original.visible = e.target.checked;
+				}
+			});
+			
+			// Send state to parent window when iframe is used
+			window.addEventListener('message', function(event) {
+				// Handle messages from parent window
+				if (event.data.type === 'setVisibility') {
+					const { category, visible } = event.data;
+					if (window.shapefiles[category]) {
+						window.shapefiles[category].visible = visible;
+						document.getElementById(`show${category.charAt(0).toUpperCase() + category.slice(1)}`).checked = visible;
+					}
+				}
+			});
+		}
+		
+		// Add a global resetView function to fit view to point cloud and shapefiles
+		window.resetView = function() {
+			console.log("Attempting to reset view to show all objects");
+			if (viewer && viewer.scene) {
+				// Try to center the view on the point cloud
+				viewer.fitToScreen();
+				
+				// Alternative approach to set a specific view position that we know works
+				// You may need to adjust these coordinates to match your data
+				viewer.scene.view.position.set(507844.7, 1627083.5, 332.9);
+				viewer.scene.view.lookAt(new THREE.Vector3(507474.9, 1627448.9, -15.1));
+			}
+		}
+		
+		// Function to send camera position to parent window
+		function sendCameraPosition() {
+			if (window.parent !== window) {
+				window.parent.postMessage({
+					type: 'cameraPosition',
+					position: viewer.scene.view.position.toArray(),
+					target: viewer.scene.view.getPivot().toArray()
+				}, '*');
+			}
+		}
+		
+		// Periodically send camera position
+		setInterval(sendCameraPosition, 1000);
+	</script>
+</body>
+</html>

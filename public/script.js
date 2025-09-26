@@ -14,13 +14,13 @@ let isPredictionMode = false; // Toggle between species view and prediction view
 
 // Color mapping for different tree species
 const speciesColors = {
-    // Define a color palette for tree species
-    'Acacia': '#e41a1c',
-    'Dipterocarp': '#377eb8',
-    'Mahogany': '#4daf4a',
-    'Narra': '#984ea3',
-    'Pine': '#ff7f00',
-    'Unknown': '#a65628',
+    // Define a color palette for tree taxonomic groups
+    'Rosids': '#e41a1c',     // Red 
+    'Basals': '#377eb8',     // Blue
+    'Asterids': '#4daf4a',   // Green
+    'Monocots': '#984ea3',   // Purple
+    'Others': '#ff7f00',     // Orange
+    'Unknown': '#a65628',    // Brown
     // Default color for any other species
     'default': '#ffc107'
 };
@@ -151,14 +151,17 @@ async function loadPredictionData() {
         const lines = csv.split('\n');
         const headers = lines[0].split(',');
         
-        // Map group numbers to species names for better display
+        // Map group numbers to species names for better display - updated with correct taxonomic groups
         const groupToSpecies = {
-            '1.0': 'Pine', 
-            '2.0': 'Mahogany',
-            '3.0': 'Narra',
-            '4.0': 'Acacia',
-            '5.0': 'Dipterocarp'
+            '1.0': 'Rosids', 
+            '2.0': 'Basals',
+            '3.0': 'Asterids',
+            '4.0': 'Monocots',
+            '5.0': 'Others'
         };
+        
+        // Log the mapping for debugging
+        console.log("Using species mapping:", groupToSpecies);
         
         const allTreeData = [];  // Combined array for both test and training trees
         
@@ -185,8 +188,10 @@ async function loadPredictionData() {
                 
                 const predictionObj = {
                     treeId: treeId,
-                    actual: actualSpecies,
-                    predicted: groupToSpecies[predictedGroup] || `Group ${predictedGroup}`,
+                    actualGroup: actualGroup,
+                    predictedGroup: predictedGroup,
+                    actual: `${actualSpecies} (Group ${actualGroup})`,
+                    predicted: `${groupToSpecies[predictedGroup] || `Group ${predictedGroup}`} (Group ${predictedGroup})`,
                     correct: isCorrect,
                     isTraining: false,
                     dataType: 'test'
@@ -196,7 +201,8 @@ async function loadPredictionData() {
                 // For training data
                 const trainingObj = {
                     treeId: treeId,
-                    actual: actualSpecies,
+                    actualGroup: actualGroup,
+                    actual: `${actualSpecies} (Group ${actualGroup})`,
                     isTraining: true,
                     dataType: 'train'
                 };
@@ -208,6 +214,16 @@ async function loadPredictionData() {
         const trainingTrees = allTreeData.filter(tree => tree.dataType === 'train');
         
         console.log(`Loaded ${testTrees.length} test trees and ${trainingTrees.length} training trees`);
+        
+        // Log a few examples to verify mappings
+        if (testTrees.length > 0) {
+            console.log("Example mappings:");
+            for (let i = 0; i < Math.min(5, testTrees.length); i++) {
+                const tree = testTrees[i];
+                console.log(`Tree ${tree.treeId}: Group ${tree.actualGroup} (${tree.actual}) → Group ${tree.predictedGroup} (${tree.predicted})`);
+            }
+        }
+        
         return allTreeData;
     } catch (error) {
         console.error('Error loading prediction data:', error);
@@ -486,6 +502,21 @@ function createSpeciesLegend() {
                 accuracyItem.textContent = `Test Accuracy: ${accuracy}%`;
                 div.appendChild(accuracyItem);
                 
+                // Add group explanation
+                const groupExplanation = document.createElement('div');
+                groupExplanation.style.fontSize = '11px';
+                groupExplanation.style.marginTop = '8px';
+                groupExplanation.style.color = '#555';
+                groupExplanation.innerHTML = `
+                    <strong>Tree Groups:</strong><br>
+                    1: Rosids - 544 trees<br>
+                    2: Basals - 155 trees<br>
+                    3: Asterids - 166 trees<br>
+                    4: Monocots - 77 trees<br>
+                    5: Others - 109 trees
+                `;
+                div.appendChild(groupExplanation);
+                
                 // Add ratio information
                 const trainingRatio = (trainingCount / totalTrees * 100).toFixed(1);
                 const testRatio = (totalPredictions / totalTrees * 100).toFixed(1);
@@ -655,6 +686,36 @@ function setupEventListeners() {
 
     document.getElementById('loadLocalShapefileBtn').addEventListener('click', () => {
         alert("Local file loading is disabled in this example. Data is loaded from the server.");
+    });
+    
+    // Group information modal functionality
+    const groupInfoModal = document.getElementById('groupInfoModal');
+    const showGroupInfoBtn = document.getElementById('showGroupInfoBtn');
+    const closeGroupModal = document.getElementById('closeGroupModal');
+    const closeModalBtn = document.getElementById('closeModalBtn');
+    
+    if (showGroupInfoBtn) {
+        showGroupInfoBtn.addEventListener('click', () => {
+            groupInfoModal.style.display = 'block';
+        });
+    }
+    
+    if (closeGroupModal) {
+        closeGroupModal.addEventListener('click', () => {
+            groupInfoModal.style.display = 'none';
+        });
+    }
+    
+    if (closeModalBtn) {
+        closeModalBtn.addEventListener('click', () => {
+            groupInfoModal.style.display = 'none';
+        });
+    }
+    
+    window.addEventListener('click', (event) => {
+        if (event.target === groupInfoModal) {
+            groupInfoModal.style.display = 'none';
+        }
     });
 }
 
