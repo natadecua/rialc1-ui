@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Shapefile Viewer</title>
+
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+    <!-- Libraries in this specific order -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/shapefile@0.6.6/dist/shapefile.js"></script>
+    <script src="https://unpkg.com/proj4@2.11.0/dist/proj4.js"></script>
+    <script src="https://unpkg.com/proj4leaflet@1.0.2/src/proj4leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet-geometryutil@0.10.0/src/leaflet.geometryutil.js"></script>
+
+    <style>
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+        }
+        #map {
+            width: 100%;
+            height: 100vh;
+        }
+        #status {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 1000;
+            background: white;
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <div id="status">Loading...</div>
+
+    <script>
+        // Define the PRS92 / Philippines zone 3 (EPSG:3123) projection
+        proj4.defs('EPSG:3123', '+proj=tmerc +lat_0=0 +lon_0=121 +k=0.99995 +x_0=500000 +y_0=0 +ellps=clrk66 +towgs84=-127.62,-67.24,-47.04,-3.068,4.903,1.578,-1.06 +units=m +no_defs');
+        
+        // Initialize map with a specific zoom level for the La Mesa area
+        const map = L.map('map').setView([14.7137, 121.0707], 17);
+        
+        // Add OpenStreetMap tiles
+        const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        }).addTo(map);
+
+        // Add satellite imagery as an alternative base layer
+        const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community',
+        });
+
+        // Add custom tiles - note we're directly checking the server path
+        const tiffLayer = L.tileLayer('http://localhost:3000/tiles_forest/{z}/{x}/{y}.png', {
+            attribution: 'Raster Data &copy; natadecua',
+            minZoom: 15,
+            maxZoom: 22,
+            tms: true,
+            opacity: 0.7
+        }).addTo(map);
+        
+        // Add layer control to switch between base layers
+        const baseLayers = {
+            "OpenStreetMap": osmLayer,
+            "Satellite": satelliteLayer
+        };
+        
+        const overlays = {
+            "La Mesa TIFF": tiffLayer
+        };
+        
+        L.control.layers(baseLayers, overlays).addTo(map);
+
+        // Status display function
+        function updateStatus(message) {
+            document.getElementById('status').innerText = message;
+            console.log(message);
+        }
+
+        // Load shapefile
+        async function loadShapefile() {
+            try {
+                updateStatus('Loading shapefile...');
+                
+                // Basic error checking
+                if (typeof shapefile === 'undefined') {
+                    throw new Error('Shapefile library not loaded');
+                }
+                
+                // First let's test if we can access the files at all
+                try {
+                    const testResponse = await fetch('/raw_data/shapefiles/mcws_crowns_newclass.shp', { method: 'HEAD' });
+                    if (!testResponse.ok) {
+                        throw new Error(`Server returned ${testResponse.status}: ${testResponse.statusText}`);
+                    }
+                    updateStatus('Shapefile is accessible on server');
+                } catch (fetchError) {
+                    console.warn(`Cannot access shapefile in /shapefiles folder: ${fetchError.message}`);
+                    console.warn('Will try the crown_shp folder as fallback...');
+                    
+                    // Try the alternative location
+                    const altTestResponse = await fetch('/raw_data/crown_shp/mcws_crowns.shp', { method: 'HEAD' });
+                    if (!altTestResponse.ok) {
+                        throw new Error(`Could not find shapefile in either location. Server returned ${altTestResponse.status}`);
+                    }
+                    updateStatus('Found shapefile in crown_shp folder');
+                }
+                
+                // Determine which path to use based on our tests
+                let shpPath, dbfPath, prjPath;
+                
+                // First try the newclass version in shapefiles folder
+                try {
+                    const test = await fetch('/raw_data/shapefiles/mcws_crowns_newclass.shp', { method: 'HEAD' });
+                    if (test.ok) {
+                        shpPath = '/raw_data/shapefiles/mcws_crowns_newclass.shp';
+                        dbfPath = '/raw_data/shapefiles/mcws_crowns_newclass.dbf';
+                        prjPath = '/raw_data/shapefiles/mcws_crowns_newclass.prj';
+                        updateStatus('Using mcws_crowns_newclass.shp from shapefiles folder');
+                    } else {
+                        throw new Error('File not accessible');
+                    }
+                } catch (e) {
+                    // Fall back to crown_shp folder
+                    shpPath = '/raw_data/crown_shp/mcws_crowns.shp';
+                    dbfPath = '/raw_data/crown_shp/mcws_crowns.dbf';
+                    prjPath = '/raw_data/crown_shp/mcws_crowns.prj';
+                    updateStatus('Using mcws_crowns.shp from crown_shp folder');
+                }
+                
+                // Try to load the PRJ file to understand the projection
+                let projection = null;
+                try {
+                    const prjResponse = await fetch(prjPath);
+                    if (prjResponse.ok) {
+                        const prjText = await prjResponse.text();
+                        console.log('PRJ file content:', prjText);
+                        updateStatus('PRJ file loaded successfully');
+                    }
+                } catch (prjError) {
+                    console.warn('Could not load PRJ file:', prjError);
+                    // Continue anyway
+                }
+                
+                // Set encoding options for shapefile reading (ISO-8859-1 as you mentioned)
+                const options = {
+                    encoding: 'ISO-8859-1'
+                };
+                updateStatus('Using ISO-8859-1 encoding for shapefile');
+                
+                updateStatus('Reading shapefile data...');
+                // Load the shapefile with the specified encoding
+                const geojson = await shapefile.read(shpPath, dbfPath, options);
+                
+                if (!geojson || !geojson.features || geojson.features.length === 0) {
+                    throw new Error('No features found in shapefile');
+                }
+                
+                // Analyze the geometry types for debugging
+                const geometryTypes = {};
+                for (const feature of geojson.features) {
+                    if (feature.geometry && feature.geometry.type) {
+                        geometryTypes[feature.geometry.type] = (geometryTypes[feature.geometry.type] || 0) + 1;
+                    }
+                }
+                
+                console.log('Geometry types in shapefile:', geometryTypes);
+                updateStatus(`Loaded ${geojson.features.length} features (Types: ${JSON.stringify(geometryTypes)})`);
+                console.log('First feature geometry:', geojson.features[0].geometry);
+                console.log('First feature properties:', geojson.features[0].properties);
+                
+                // Function to transform coordinates from EPSG:3123 to WGS84 (EPSG:4326)
+                function transformCoordinates(coordinates, type) {
+                    if (type === 'Point') {
+                        return proj4('EPSG:3123', 'EPSG:4326', coordinates);
+                    } else if (type === 'LineString' || type === 'MultiPoint') {
+                        return coordinates.map(point => proj4('EPSG:3123', 'EPSG:4326', point));
+                    } else if (type === 'Polygon' || type === 'MultiLineString') {
+                        return coordinates.map(ring => 
+                            ring.map(point => proj4('EPSG:3123', 'EPSG:4326', point))
+                        );
+                    } else if (type === 'MultiPolygon') {
+                        return coordinates.map(polygon => 
+                            polygon.map(ring => 
+                                ring.map(point => proj4('EPSG:3123', 'EPSG:4326', point))
+                            )
+                        );
+                    }
+                    return coordinates; // Return unchanged if type is unknown
+                }
+
+                // Transform all features
+                for (const feature of geojson.features) {
+                    if (feature.geometry && feature.geometry.type) {
+                        feature.geometry.coordinates = transformCoordinates(
+                            feature.geometry.coordinates, 
+                            feature.geometry.type
+                        );
+                    }
+                }
+                
+                updateStatus(`Transformed coordinates from EPSG:3123 to WGS84`);
+                
+                // Add GeoJSON to map with different styles for different geometry types
+                const treeLayer = L.geoJSON(geojson, {
+                    style: function(feature) {
+                        // Apply different styles based on geometry type
+                        if (feature.geometry.type.includes('Polygon')) {
+                            return {
+                                color: '#ff0000', // Bright red for high visibility
+                                weight: 3,
+                                opacity: 1.0,
+                                fillColor: '#ffff00', // Yellow fill
+                                fillOpacity: 0.5
+                            };
+                        } else if (feature.geometry.type.includes('LineString')) {
+                            return {
+                                color: '#0000ff', // Blue for lines
+                                weight: 4,
+                                opacity: 1.0,
+                                dashArray: '5, 10' // Dashed line for better visibility
+                            };
+                        } else {
+                            return {
+                                color: '#00ff00', // Green for points or anything else
+                                weight: 4,
+                                opacity: 1.0,
+                                radius: 8,
+                                fillColor: '#00ff00',
+                                fillOpacity: 0.7
+                            };
+                        }
+                    },
+                    onEachFeature: (feature, layer) => {
+                        // Create a popup with all properties for debugging
+                        let popupContent = '<div><strong>Properties:</strong><br>';
+                        for (let prop in feature.properties) {
+                            popupContent += `${prop}: ${feature.properties[prop]}<br>`;
+                        }
+                        popupContent += '</div>';
+                        layer.bindPopup(popupContent);
+                        
+                        // Highlight on mouseover
+                        layer.on({
+                            mouseover: function() {
+                                this.setStyle({
+                                    weight: 5,
+                                    color: '#0000ff',
+                                    fillOpacity: 0.7
+                                });
+                            },
+                            mouseout: function() {
+                                treeLayer.resetStyle(this);
+                            }
+                        });
+                    }
+                }).addTo(map);
+                
+                // Check if the shapefile was placed on the map
+                if (treeLayer.getLayers().length === 0) {
+                    throw new Error('No features were added to the map. Possible coordinate system issue.');
+                }
+                
+                // Fit map to shapefile bounds and add a marker at the center
+                try {
+                    const bounds = treeLayer.getBounds();
+                    if (bounds.isValid()) {
+                        map.fitBounds(bounds.pad(0.1));
+                        
+                        // Add a marker at the center of the bounds for reference
+                        const center = bounds.getCenter();
+                        L.marker(center)
+                            .addTo(map)
+                            .bindPopup(`<b>Center of Tree Data</b><br>Lat: ${center.lat.toFixed(6)}<br>Lng: ${center.lng.toFixed(6)}`);
+                        
+                        updateStatus(`Displaying ${geojson.features.length} trees. Bounds: ${JSON.stringify(bounds)}`);
+                    } else {
+                        throw new Error('Invalid bounds');
+                    }
+                } catch (e) {
+                    console.error('Error fitting bounds:', e);
+                    updateStatus(`Error fitting bounds: ${e.message}. Will try manual positioning.`);
+                    
+                    // Try to manually zoom to the known area
+                    map.setView([14.7137, 121.0707], 17);
+                }
+            } catch (error) {
+                console.error('Error loading shapefile:', error);
+                updateStatus(`Error: ${error.message}`);
+            }
+        }
+
+        // Wait for everything to load then run our code
+        window.addEventListener('load', () => {
+            setTimeout(loadShapefile, 500); // Short delay to ensure map is ready
+        });
+    </script>
+</body>
+</html>

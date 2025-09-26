@@ -1,0 +1,5 @@
+# Ignoring large binary files 
+octree.bin
+*.bin
+*.las
+*.laz

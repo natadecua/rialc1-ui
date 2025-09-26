@@ -1,0 +1,22 @@
+{
+  "name": "rialc1-ui-backend",
+  "version": "1.0.0",
+  "description": "Backend server for the LiDAR Tree Species Identification thesis project.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "gis",
+    "lidar",
+    "geotiff",
+    "leaflet"
+  ],
+  "author": "natadecua",
+  "license": "ISC",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2"
+  }
+}
