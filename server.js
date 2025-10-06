@@ -18,6 +18,9 @@ app.use('/raw_data', express.static(path.join(__dirname, 'raw_data')));
 // 3. Serve the pre-generated map tiles from the 'tiles' directory
 app.use('/tiles_forest', express.static(path.join(__dirname, 'tiles_forest')));
 
+// 4. Serve the Potree library files
+app.use('/Potree_1.8.2', express.static(path.join(__dirname, 'Potree_1.8.2')));
+
     
 // --- API Endpoints ---
 // A simple endpoint to check if the server is running

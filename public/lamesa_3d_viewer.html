@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="description" content="La Mesa Ecopark - Tree Classification 3D Viewer">
+    <meta name="author" content="">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>La Mesa Ecopark - 3D Viewer</title>
+
+    <!-- CSS stylesheets for the layout -->
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            width: 100%;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+        .header {
+            background-color: #2c3e50;
+            color: white;
+            padding: 10px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 1.5rem;
+        }
+        .viewer-container {
+            flex: 1;
+            display: flex;
+            border-top: 1px solid #ccc;
+        }
+        .iframe-container {
+            flex: 1;
+            height: 100%;
+        }
+        iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+        .legend {
+            position: absolute;
+            right: 20px;
+            bottom: 20px;
+            background: rgba(255,255,255,0.8);
+            padding: 10px;
+            border-radius: 5px;
+            border: 1px solid #ccc;
+            max-width: 300px;
+            z-index: 1000;
+        }
+        .legend h3 {
+            margin-top: 0;
+            margin-bottom: 10px;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+        .color-box {
+            width: 20px;
+            height: 20px;
+            margin-right: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>La Mesa Ecopark - Tree Classification 3D Viewer</h1>
+            <div>
+                <button id="toggleLegend">Toggle Legend</button>
+            </div>
+        </div>
+        <div class="viewer-container">
+            <div class="iframe-container">
+                <iframe src="/embedded_lamesa_viewer.html" allowfullscreen></iframe>
+            </div>
+        </div>
+    </div>
+
+    <div class="legend" id="legend">
+        <h3>Tree Classification</h3>
+        <div class="legend-item">
+            <div class="color-box" style="background-color: rgb(0, 255, 0);"></div>
+            <div>Rosids (Group 1)</div>
+        </div>
+        <div class="legend-item">
+            <div class="color-box" style="background-color: rgb(255, 0, 0);"></div>
+            <div>Basals (Group 2)</div>
+        </div>
+        <div class="legend-item">
+            <div class="color-box" style="background-color: rgb(0, 0, 255);"></div>
+            <div>Asterids (Group 3)</div>
+        </div>
+        <div class="legend-item">
+            <div class="color-box" style="background-color: rgb(255, 255, 0);"></div>
+            <div>Monocots (Group 4)</div>
+        </div>
+        <div class="legend-item">
+            <div class="color-box" style="background-color: rgb(255, 0, 255);"></div>
+            <div>Others (Group 5)</div>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('toggleLegend').addEventListener('click', function() {
+            const legend = document.getElementById('legend');
+            if (legend.style.display === 'none') {
+                legend.style.display = 'block';
+            } else {
+                legend.style.display = 'none';
+            }
+        });
+    </script>
+</body>
+</html>

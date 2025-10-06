@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="description" content="La Mesa Ecopark - Tree Segmentation Embedded Viewer">                    try {
+                        console.log("Attempting to load shapefile from: /raw_data/shapefiles/mcws_crowns_newclass.shp");
+                        // Load tree crown shapefile with error handling
+                        const shpTrees = await loader.load("/raw_data/shapefiles/mcws_crowns_newclass.shp")
+                            .catch(error => {
+                                console.error("Error loading shapefile:", error);
+                                throw new Error(`Failed to load shapefile: ${error.message || error}`);
+                            });
+                        
+                        // Group 1: Rosids (green)
+                        const rosidsNode = new THREE.Object3D();<meta name="author" content="">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Potree Viewer - La Mesa Ecopark</title>
+
+    <link rel="stylesheet" type="text/css" href="/Potree_1.8.2/build/potree/potree.css">
+    <link rel="stylesheet" type="text/css" href="/Potree_1.8.2/libs/jquery-ui/jquery-ui.min.css">
+    <link rel="stylesheet" type="text/css" href="/Potree_1.8.2/libs/openlayers3/ol.css">
+    <link rel="stylesheet" type="text/css" href="/Potree_1.8.2/libs/spectrum/spectrum.css">
+    <link rel="stylesheet" type="text/css" href="/Potree_1.8.2/libs/jstree/themes/mixed/style.css">
+</head>
+
+<body>
+    <script src="/Potree_1.8.2/libs/jquery/jquery-3.1.1.min.js"></script>
+    <script src="/Potree_1.8.2/libs/spectrum/spectrum.js"></script>
+    <script src="/Potree_1.8.2/libs/jquery-ui/jquery-ui.min.js"></script>
+    <script src="/Potree_1.8.2/libs/other/BinaryHeap.js"></script>
+    <script src="/Potree_1.8.2/libs/tween/tween.min.js"></script>
+    <script src="/Potree_1.8.2/libs/d3/d3.js"></script>
+    <script src="/Potree_1.8.2/libs/proj4/proj4.js"></script>
+    <script src="/Potree_1.8.2/libs/openlayers3/ol.js"></script>
+    <script src="/Potree_1.8.2/libs/i18next/i18next.js"></script>
+    <script src="/Potree_1.8.2/libs/jstree/jstree.js"></script>
+    <script src="/Potree_1.8.2/build/potree/potree.js"></script>
+    <script src="/Potree_1.8.2/libs/plasio/js/laslaz.js"></script>
+    <script src="/Potree_1.8.2/libs/shapefile/shapefile.js"></script>
+    
+    <div class="potree_container" style="position: absolute; width: 100%; height: 100%; left: 0px; top: 0px; ">
+        <div id="potree_render_area" style="background-image: url('/Potree_1.8.2/build/potree/resources/images/background.jpg');"></div>
+        <div id="potree_sidebar_container"> </div>
+    </div>
+    
+    <script type="module">
+        import * as THREE from "/Potree_1.8.2/libs/three.js/build/three.module.js";
+    
+        // Initialize the viewer with debugging
+        window.viewer = new Potree.Viewer(document.getElementById("potree_render_area"));
+        
+        // Enable debug mode to see more information in console
+        Potree.debug.enabled = true;
+        console.log("Potree viewer initialized with debug mode");
+        
+        viewer.setEDLEnabled(true); // Enhanced depth perception
+        viewer.setFOV(60);
+        viewer.setPointBudget(10_000_000); // Increased for better visualization
+        viewer.loadSettingsFromURL();
+        
+        viewer.setDescription('La Mesa Ecopark: Tree Classification with Taxonomic Groups');
+        
+        // Initial camera position - will be refined once point cloud loads
+        viewer.scene.view.position.set(507700, 1627200, 300);
+        
+        // Add a quality setting to improve rendering
+        viewer.setQuality("Squares");
+        
+        // Add a message during loading
+        document.getElementById("potree_render_area").innerHTML += 
+            `<div id="loadingMessage" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,0.7);color:white;padding:20px;border-radius:10px;">
+                Loading point cloud data... Please wait.
+            </div>`;
+        
+        viewer.loadGUI(() => {
+            viewer.setLanguage('en');
+            $("#menu_tools").next().show();
+            $("#menu_scene").next().show();
+            viewer.toggleSidebar();
+        });
+        
+        console.log("Attempting to load point cloud from: /raw_data/modified_merged_converted/metadata.json");
+        
+        // Add timeouts to make sure viewer doesn't hang indefinitely
+        const loadTimeout = setTimeout(() => {
+            console.error("Point cloud load timeout after 60 seconds");
+            document.getElementById("loadingMessage").innerHTML = 
+                "Loading taking longer than expected.<br>Please check console for errors or refresh the page.";
+        }, 60000);
+        
+        Potree.loadPointCloud(
+            "/raw_data/modified_merged_converted/metadata.json", 
+            "La Mesa Forest", 
+            async function(e) {
+                try {
+                    // Clear the timeout since we loaded successfully
+                    clearTimeout(loadTimeout);
+                    
+                    console.log("Point cloud loaded successfully");
+                    
+                    // Remove the loading message
+                    const loadingMessage = document.getElementById("loadingMessage");
+                    if (loadingMessage) {
+                        loadingMessage.remove();
+                    }
+                    
+                    let scene = viewer.scene;
+                    let pointcloud = e.pointcloud;
+                    let material = pointcloud.material;
+                    
+                    // Add point cloud to scene
+                    scene.addPointCloud(pointcloud);
+                    console.log("Point cloud added to scene");
+                    
+                    material.pointSizeType = Potree.PointSizeType.ADAPTIVE;
+                    material.size = 1.5; // Slightly larger points for better visibility
+                    
+                    // Try different visualization attributes
+                    // Available options based on metadata: position, intensity, classification, rgb
+                    material.activeAttributeName = "rgb"; // Try RGB if available
+                    if (!material.attributes.includes("rgb")) {
+                        material.activeAttributeName = "intensity"; // Fallback to intensity
+                    }
+                    
+                    console.log("Available attributes:", material.attributes);
+                    console.log("Active attribute:", material.activeAttributeName);
+                    
+                    // Set camera to better match the actual data bounds from metadata.json
+                    // Adjusted position based on the point cloud's bounding box
+                    const center = new THREE.Vector3(
+                        (pointcloud.boundingBox.min.x + pointcloud.boundingBox.max.x) / 2,
+                        (pointcloud.boundingBox.min.y + pointcloud.boundingBox.max.y) / 2,
+                        (pointcloud.boundingBox.min.z + pointcloud.boundingBox.max.z) / 2
+                    );
+                    
+                    // Position camera above the center of the point cloud
+                    scene.view.position.set(
+                        center.x, 
+                        center.y - 100, // Position slightly offset from center
+                        center.z + 200  // Position above the point cloud
+                    );
+                    scene.view.lookAt(center);
+                    
+                    // Log camera position for debugging
+                    console.log("Point cloud bounds:", pointcloud.boundingBox);
+                    console.log("Camera position:", scene.view.position);
+                    console.log("Looking at:", center);
+                    
+                    // Load shapefiles with taxonomic group coloring
+                    try {
+                        // Define coordinate systems
+                        // Philippine Reference System 1992 Zone 3 (PRS92)
+                        const prs92 = "+proj=tmerc +lat_0=0 +lon_0=121 +k=0.99995 +x_0=500000 +y_0=0 +ellps=clrk66 +towgs84=-127.62,-67.24,-47.04,-3.068,4.903,1.578,-1.06 +units=m +no_defs";
+                        
+                        // Define the point cloud projection
+                        // If the metadata doesn't specify, we need to define it manually
+                        // Use the projection string from the .prj file
+                        proj4.defs("pointcloud", prs92);
+                        proj4.defs("shapefile", prs92);
+                        
+                        // Create transform function
+                        let transform = proj4("shapefile", "pointcloud");
+                        
+                        // Initialize shapefile loader
+                        const loader = new Potree.ShapefileLoader();
+                        loader.transform = transform;
+                        
+                        // Create parent node for all shapefile layers
+                        const treeGroupsNode = new THREE.Object3D();
+                        treeGroupsNode.name = "Tree Taxonomic Groups";
+                        viewer.scene.scene.add(treeGroupsNode);
+                        
+                        // Load tree crown shapefile
+                        const shpTrees = await loader.load("/raw_data/shapefiles/mcws_crowns_newclass.shp");
+                        
+                        // Group 1: Rosids (green)
+                        const rosidsNode = new THREE.Object3D();
+                        rosidsNode.name = "Rosids (Group 1)";
+                        
+                        // Group 2: Basals (red)
+                        const basalsNode = new THREE.Object3D();
+                        basalsNode.name = "Basals (Group 2)";
+                        
+                        // Group 3: Asterids (blue)
+                        const asteridsNode = new THREE.Object3D();
+                        asteridsNode.name = "Asterids (Group 3)";
+                        
+                        // Group 4: Monocots (yellow)
+                        const monocotsNode = new THREE.Object3D();
+                        monocotsNode.name = "Monocots (Group 4)";
+                        
+                        // Group 5: Others (magenta)
+                        const othersNode = new THREE.Object3D();
+                        othersNode.name = "Others (Group 5)";
+                        
+                        // Add all group nodes to the parent
+                        treeGroupsNode.add(rosidsNode);
+                        treeGroupsNode.add(basalsNode);
+                        treeGroupsNode.add(asteridsNode);
+                        treeGroupsNode.add(monocotsNode);
+                        treeGroupsNode.add(othersNode);
+                        
+                        // Check if we have the shapefile data loaded
+                        if (shpTrees && shpTrees.node) {
+                            // Clone the shapefile meshes for each group and color them accordingly
+                            shpTrees.node.traverse(node => {
+                                if (node.isMesh) {
+                                    // Group 1: Rosids (green)
+                                    const rosidsMesh = node.clone();
+                                    rosidsMesh.material = node.material.clone();
+                                    rosidsMesh.material.color.setRGB(0, 1, 0);
+                                    rosidsNode.add(rosidsMesh);
+                                    
+                                    // Group 2: Basals (red)
+                                    const basalsMesh = node.clone();
+                                    basalsMesh.material = node.material.clone();
+                                    basalsMesh.material.color.setRGB(1, 0, 0);
+                                    basalsNode.add(basalsMesh);
+                                    
+                                    // Group 3: Asterids (blue)
+                                    const asteridsMesh = node.clone();
+                                    asteridsMesh.material = node.material.clone();
+                                    asteridsMesh.material.color.setRGB(0, 0, 1);
+                                    asteridsNode.add(asteridsMesh);
+                                    
+                                    // Group 4: Monocots (yellow)
+                                    const monocotsMesh = node.clone();
+                                    monocotsMesh.material = node.material.clone();
+                                    monocotsMesh.material.color.setRGB(1, 1, 0);
+                                    monocotsNode.add(monocotsMesh);
+                                    
+                                    // Group 5: Others (magenta)
+                                    const othersMesh = node.clone();
+                                    othersMesh.material = node.material.clone();
+                                    othersMesh.material.color.setRGB(1, 0, 1);
+                                    othersNode.add(othersMesh);
+                                }
+                            });
+                        }
+                        
+                        // This is needed to ensure proper line width rendering
+                        viewer.addEventListener("update", () => {
+                            const size = viewer.renderer.getSize(new THREE.Vector2());
+                            if (shpTrees && shpTrees.setResolution) {
+                                shpTrees.setResolution(size.width, size.height);
+                            }
+                        });
+                        
+                        // Add the groups to the sidebar once the GUI is loaded
+                        viewer.onGUILoaded(() => {
+                            let tree = $(`#jstree_scene`);
+                            let parentNode = "other";
+                            
+                            // Create a new parent node for tree groups
+                            let treeGroupsID = tree.jstree('create_node', parentNode, { 
+                                "text": "Tree Taxonomic Groups", 
+                                "icon": `${Potree.resourcePath}/icons/triangle.svg`,
+                                "object": treeGroupsNode,
+                                "data": treeGroupsNode,
+                            }, "last", false, false);
+                            
+                            // Add each group as a child of the tree groups node
+                            let rosidsID = tree.jstree('create_node', treeGroupsID, { 
+                                "text": "Rosids (Group 1)", 
+                                "icon": `${Potree.resourcePath}/icons/triangle.svg`,
+                                "object": rosidsNode,
+                                "data": rosidsNode,
+                            }, "last", false, false);
+                            tree.jstree(rosidsNode.visible ? "check_node" : "uncheck_node", rosidsID);
+                            
+                            let basalsID = tree.jstree('create_node', treeGroupsID, { 
+                                "text": "Basals (Group 2)", 
+                                "icon": `${Potree.resourcePath}/icons/triangle.svg`,
+                                "object": basalsNode,
+                                "data": basalsNode,
+                            }, "last", false, false);
+                            tree.jstree(basalsNode.visible ? "check_node" : "uncheck_node", basalsID);
+                            
+                            let asteridsID = tree.jstree('create_node', treeGroupsID, { 
+                                "text": "Asterids (Group 3)", 
+                                "icon": `${Potree.resourcePath}/icons/triangle.svg`,
+                                "object": asteridsNode,
+                                "data": asteridsNode,
+                            }, "last", false, false);
+                            tree.jstree(asteridsNode.visible ? "check_node" : "uncheck_node", asteridsID);
+                            
+                            let monocotsID = tree.jstree('create_node', treeGroupsID, { 
+                                "text": "Monocots (Group 4)", 
+                                "icon": `${Potree.resourcePath}/icons/triangle.svg`,
+                                "object": monocotsNode,
+                                "data": monocotsNode,
+                            }, "last", false, false);
+                            tree.jstree(monocotsNode.visible ? "check_node" : "uncheck_node", monocotsID);
+                            
+                            let othersID = tree.jstree('create_node', treeGroupsID, { 
+                                "text": "Others (Group 5)", 
+                                "icon": `${Potree.resourcePath}/icons/triangle.svg`,
+                                "object": othersNode,
+                                "data": othersNode,
+                            }, "last", false, false);
+                            tree.jstree(othersNode.visible ? "check_node" : "uncheck_node", othersID);
+                        });
+                    } catch (error) {
+                        console.error("Error loading shapefiles:", error);
+                    }
+                } catch (innerError) {
+                    console.error("Error in point cloud initialization:", innerError);
+                    document.getElementById("potree_render_area").innerHTML += 
+                        `<div style="position:absolute;top:20px;left:20px;background:rgba(255,0,0,0.7);color:white;padding:10px;">
+                            Error initializing point cloud: ${innerError.message}
+                        </div>`;
+                }
+            },
+            function(xhr) {
+                // Progress callback
+                console.log((xhr.loaded / xhr.total * 100).toFixed(2) + '% loaded');
+            },
+            function(error) {
+                // Error callback
+                console.error("Error loading point cloud:", error);
+                document.getElementById("potree_render_area").innerHTML += 
+                    `<div style="position:absolute;top:20px;left:20px;background:rgba(255,0,0,0.7);color:white;padding:10px;">
+                        Failed to load point cloud: ${error.message || error}
+                    </div>`;
+            }
+        );
+    </script>
+</body>
+</html>
