@@ -286,15 +286,17 @@ function initializeMap() {
 
     osmBase.addTo(map);
 
-    const customTilesOverlay = L.tileLayer('http://localhost:3000/tiles_forest/{z}/{x}/{y}.png', {
-        attribution: 'Raster Data &copy; natadecua',
-        minZoom: 15,
+    // Create forest tile layer
+    const forestTiles = L.tileLayer('http://localhost:3000/tiles/{z}/{x}/{y}.png', {
+        attribution: 'Forest Tiles &copy; natadecua',
+        minZoom: 15, 
         maxZoom: 22,
-        tms: true,
-        opacity: 1.0 
+        tms: true,  // Use TMS coordinates (y-flipped)
+        opacity: 1.0
     });
-
-    customTilesOverlay.addTo(map);
+    
+    // Add forest tiles to the map
+    forestTiles.addTo(map);
 
     const baseLayers = {
         "OpenStreetMap": osmBase,
@@ -302,7 +304,7 @@ function initializeMap() {
     };
 
     const overlays = {
-        "La Mesa Ecopark Tiles": customTilesOverlay,
+        "La Mesa Forest Tiles": forestTiles,
         "Tree Crowns": treeLayers
     };
 

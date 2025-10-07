@@ -1,10 +1,10 @@
-# rialc1-ui
+# La Mesa Ecopark LiDAR Tree Species Identification UI
 
-A thesis UI design for LiDAR tree species identification using **Potree** for high-performance point cloud visualization.
+A thesis UI design for LiDAR tree species identification using interactive 2D maps and **Potree** for high-performance point cloud visualization.
 
 ## Overview
 
-This web application visualizes tree species identification results on LiDAR point cloud data using Potree, the industry-standard tool for forestry and point cloud analysis. It provides classification-based coloring, measurement tools, clipping volumes, and 3D tree markers for detailed examination of model predictions.
+This web application visualizes tree species identification results using both 2D interactive maps and 3D point cloud visualization. The 2D interface allows exploration of tree crown polygons with classification data, while the 3D interface (powered by Potree) provides detailed point cloud analysis with classification-based coloring, measurement tools, clipping volumes, and 3D tree markers.
 
 ## Potree Integration Workflow
 
@@ -41,23 +41,56 @@ This web application visualizes tree species identification results on LiDAR poi
 - **Shapefile Integration**: Load plot boundaries as overlays
 - **Model Evaluation**: Visual comparison of predictions vs ground truth
 
-## Quick Start
+## Getting Started
 
-1. Clone this repository
-2. Start a local server: `python -m http.server 8000`
-3. Open http://localhost:8000 in your browser
-4. Load your Potree-converted data and shapefiles
-5. Analyze your tree identification results in 3D
+### Prerequisites
 
-## File Structure
+- Node.js (v14 or higher)
+- Web browser supporting WebGL (Chrome, Firefox, Edge recommended)
 
-- `index.html` - Main application interface
-- `script.js` - Potree integration and application logic
-- `style.css` - UI styling including Potree viewer styles
-- `raw_data/` - Sample data directory
-  - `lamesa_processed.las` - Sample LAS file
-  - `crown_shp/` - Sample shapefiles
-- `trees.geojson` - Sample tree identification results
+### Installation
+
+1. Clone this repository:
+   ```bash
+   git clone https://github.com/natadecua/rialc1-ui.git
+   cd rialc1-ui
+   ```
+
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
+
+3. Start the server:
+   ```bash
+   npm start
+   ```
+
+4. Open http://localhost:3000 in your browser
+
+5. Main features:
+   - Use the 2D map interface to explore tree crown polygons and classification results
+   - Click "View 3D Model" or "View Direct 3D Viewer" for 3D point cloud visualization
+   - Analyze tree identification results in both 2D and 3D
+
+## Project Structure
+
+```
+rialc1-ui/
+├── public/                  # Frontend files served by Express
+│   ├── index.html           # Main 2D map application HTML
+│   ├── script.js            # Main JavaScript for the 2D application
+│   ├── style.css            # CSS for the application
+│   ├── lamesa_3d_viewer.html    # 3D LiDAR viewer (embedded version)
+│   └── lamesa_potree_viewer.html # Direct 3D LiDAR viewer
+├── lamesa_forest_final_fixed/ # Map tiles for the web application
+├── raw_data/                # Source data including shapefiles, TIFFs, LAS files
+│   ├── crown_shp/           # Tree crown shapefiles
+│   ├── lamesa_processed.las # Sample LAS file
+│   └── prediction_results.csv # Model prediction results
+├── Potree_1.8.2/            # Potree library for 3D point cloud rendering
+├── server.js                # Node.js/Express server
+└── TILE_MANAGEMENT.md       # Documentation for tile generation and management
 
 ## Why Potree?
 

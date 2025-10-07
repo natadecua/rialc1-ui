@@ -1,0 +1,1 @@
+C:\Users\natha\Thesis_UI\rialc1-ui\raw_data>gdal2tiles --profile=mercator --tmscompatible --zoom=15-22 --webviewer=all --title="La Mesa Forest Final Tiles" "lamesa_forest_final.tif" lamesa_forest_final_fixed

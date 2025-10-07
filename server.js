@@ -1,6 +1,7 @@
 const express = require('express');
 const path = require('path');
 const cors = require('cors');
+const fs = require('fs');
 
 const app = express();
 const port = 3000;
@@ -15,8 +16,8 @@ app.use(express.static(path.join(__dirname, 'public')));
 // 2. Serve the raw_data directory from the project root
 app.use('/raw_data', express.static(path.join(__dirname, 'raw_data')));
 
-// 3. Serve the pre-generated map tiles from the 'tiles' directory
-app.use('/tiles_forest', express.static(path.join(__dirname, 'tiles_forest')));
+// 3. Serve the pre-generated map tiles from our final tiles directory
+app.use('/tiles', express.static(path.join(__dirname, 'lamesa_forest_final_fixed')));
 
 // 4. Serve the Potree library files
 app.use('/Potree_1.8.2', express.static(path.join(__dirname, 'Potree_1.8.2')));
@@ -32,5 +33,5 @@ app.listen(port, () => {
     console.log(`Server listening at http://localhost:${port}`);
     console.log('Serving frontend from the "public" directory.');
     console.log('Serving raw data from the "raw_data" directory.');
-    console.log('Serving map tiles from the "tiles_forest" directory.');
+    console.log('Serving map tiles from the "lamesa_forest_final_fixed" directory.');
 });
