@@ -1,4 +1,5 @@
-// LiDAR Tree Species Identification UI
+import { speciesColors, createSpeciesColorHelper } from './js/colors.js';
+import { loadPredictionData } from './js/predictions.js';
 
 console.log('=== SCRIPT LOADED ===');
 
@@ -12,84 +13,13 @@ let treeLayers = L.layerGroup(); // Use a layer group for tree polygons
 let predictionData = []; // Store prediction data from CSV
 let isPredictionMode = false; // Toggle between species view and prediction view
 
-// Color mapping for different tree species
-const speciesColors = {
-    // Define a color palette for tree taxonomic groups
-    'Rosids': '#e41a1c',     // Red 
-    'Basals': '#377eb8',     // Blue
-    'Asterids': '#4daf4a',   // Green
-    'Monocots': '#984ea3',   // Purple
-    'Others': '#ff7f00',     // Orange
-    'Unknown': '#a65628',    // Brown
-    // Default color for any other species
-    'default': '#ffc107'
-};
+const colorHelper = createSpeciesColorHelper();
 
-// Dynamic color palette for automatically assigning colors to species
-const dynamicColorPalette = [
-    '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', 
-    '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf',
-    '#aec7e8', '#ffbb78', '#98df8a', '#ff9896', '#c5b0d5',
-    '#c49c94', '#f7b6d2', '#c7c7c7', '#dbdb8d', '#9edae5',
-    '#3366cc', '#dc3912', '#ff9900', '#109618', '#990099',
-    '#0099c6', '#dd4477', '#66aa00', '#b82e2e', '#316395'
-];
-
-// Cache for dynamically assigned colors
-const dynamicSpeciesColors = {};
-let colorIndex = 0;
-
-// Function to get color based on species or prediction status
 function getSpeciesColor(species, treeId) {
-    // If we're in prediction mode and we have a treeId, check prediction status
-    if (isPredictionMode && treeId) {
-        // Convert treeId to string for comparison
-        const treeIdStr = treeId.toString();
-        
-        // Find the tree data for this tree
-        const treeData = predictionData.find(p => p.treeId === treeIdStr);
-        
-        if (treeData) {
-            if (treeData.isTraining) {
-                // Return color for training trees
-                return '#FFC107'; // Amber color for training data
-            } else {
-                // Return color based on prediction correctness
-                console.log(`Found prediction for tree ${treeIdStr}: ${treeData.correct ? 'correct' : 'incorrect'}`);
-                return treeData.correct ? '#4CAF50' : '#F44336'; // Green for correct, Red for incorrect
-            }
-        } else {
-            console.log(`No data found for tree ${treeIdStr}`);
-        }
-    }
-    
-    // Regular species coloring (when not in prediction mode or no tree data found)
-    if (!species) return speciesColors.default;
-    
-    // Try to find direct match in predefined colors
-    if (speciesColors[species]) return speciesColors[species];
-    
-    // Check for partial matches in predefined colors
-    for (const key in speciesColors) {
-        if (key !== 'default' && species.toLowerCase().includes(key.toLowerCase())) {
-            return speciesColors[key];
-        }
-    }
-    
-    // Check if we've already assigned a dynamic color to this species
-    if (dynamicSpeciesColors[species]) {
-        return dynamicSpeciesColors[species];
-    }
-    
-    // Assign a new color from the palette
-    const newColor = dynamicColorPalette[colorIndex % dynamicColorPalette.length];
-    colorIndex++;
-    
-    // Store the assigned color for future use
-    dynamicSpeciesColors[species] = newColor;
-    
-    // Return the newly assigned color
-    return newColor;
+    return colorHelper.getColor(species, treeId, {
+        isPredictionMode,
+        predictionData,
+    });
 }
 
 // Toggle between normal view and prediction view
@@ -139,96 +69,6 @@ function togglePredictionMode() {
     
     // Update the legend to show prediction colors instead of species colors
     updateLegendForPredictionMode();
-}
-
-// Function to load prediction data from CSV
-async function loadPredictionData() {
-    try {
-        const response = await fetch('/raw_data/prediction_results.csv');
-        const csv = await response.text();
-        
-        // Parse CSV
-        const lines = csv.split('\n');
-        const headers = lines[0].split(',');
-        
-        // Map group numbers to species names for better display - updated with correct taxonomic groups
-        const groupToSpecies = {
-            '1.0': 'Rosids', 
-            '2.0': 'Basals',
-            '3.0': 'Asterids',
-            '4.0': 'Monocots',
-            '5.0': 'Others'
-        };
-        
-        // Log the mapping for debugging
-        console.log("Using species mapping:", groupToSpecies);
-        
-        const allTreeData = [];  // Combined array for both test and training trees
-        
-        for (let i = 1; i < lines.length; i++) {
-            if (!lines[i].trim()) continue;
-            
-            const values = lines[i].split(',');
-            
-            // Make sure we convert any floating point numbers to integers for tree IDs
-            // This converts "1.0" to "1" for proper matching with shapefile tree IDs
-            let treeId = values[0].trim();
-            if (treeId.endsWith(".0")) {
-                treeId = treeId.substring(0, treeId.length - 2);
-            }
-            
-            const actualGroup = values[1].trim();
-            const splitType = values[2].trim();
-            const actualSpecies = groupToSpecies[actualGroup] || `Group ${actualGroup}`;
-            
-            if (splitType === 'test' && values[3] && values[3].trim() !== '') {
-                // For test data with predictions
-                const predictedGroup = values[3].trim();
-                const isCorrect = values[4] && values[4].trim() === '1.0';
-                
-                const predictionObj = {
-                    treeId: treeId,
-                    actualGroup: actualGroup,
-                    predictedGroup: predictedGroup,
-                    actual: `${actualSpecies} (Group ${actualGroup})`,
-                    predicted: `${groupToSpecies[predictedGroup] || `Group ${predictedGroup}`} (Group ${predictedGroup})`,
-                    correct: isCorrect,
-                    isTraining: false,
-                    dataType: 'test'
-                };
-                allTreeData.push(predictionObj);
-            } else if (splitType === 'train') {
-                // For training data
-                const trainingObj = {
-                    treeId: treeId,
-                    actualGroup: actualGroup,
-                    actual: `${actualSpecies} (Group ${actualGroup})`,
-                    isTraining: true,
-                    dataType: 'train'
-                };
-                allTreeData.push(trainingObj);
-            }
-        }
-        
-        const testTrees = allTreeData.filter(tree => tree.dataType === 'test');
-        const trainingTrees = allTreeData.filter(tree => tree.dataType === 'train');
-        
-        console.log(`Loaded ${testTrees.length} test trees and ${trainingTrees.length} training trees`);
-        
-        // Log a few examples to verify mappings
-        if (testTrees.length > 0) {
-            console.log("Example mappings:");
-            for (let i = 0; i < Math.min(5, testTrees.length); i++) {
-                const tree = testTrees[i];
-                console.log(`Tree ${tree.treeId}: Group ${tree.actualGroup} (${tree.actual}) → Group ${tree.predictedGroup} (${tree.predicted})`);
-            }
-        }
-        
-        return allTreeData;
-    } catch (error) {
-        console.error('Error loading prediction data:', error);
-        return [];
-    }
 }
 
 // --- Application Initialization ---
@@ -564,7 +404,8 @@ function createSpeciesLegend() {
             });
             
             // Also add dynamically assigned colors
-            const dynamicSpeciesNames = Object.keys(dynamicSpeciesColors).filter(name => !speciesNames.includes(name)).sort();
+            const dynamicAssignments = colorHelper.getDynamicAssignments();
+            const dynamicSpeciesNames = Object.keys(dynamicAssignments).filter(name => !speciesNames.includes(name)).sort();
             
             if (dynamicSpeciesNames.length > 0) {
                 // Add separator if we have both predefined and dynamic colors
@@ -586,7 +427,7 @@ function createSpeciesLegend() {
                     colorBox.style.display = 'inline-block';
                     colorBox.style.width = '15px';
                     colorBox.style.height = '15px';
-                    colorBox.style.backgroundColor = dynamicSpeciesColors[name];
+                    colorBox.style.backgroundColor = dynamicAssignments[name];
                     colorBox.style.marginRight = '5px';
                     colorBox.style.borderRadius = '3px';
                     
@@ -616,8 +457,7 @@ function updateLegendForPredictionMode() {
     // Clear any existing dynamic species colors when switching modes
     if (isPredictionMode) {
         // Reset dynamic colors when entering prediction mode
-        dynamicSpeciesColors = {};
-        colorIndex = 0;
+        colorHelper.reset();
     }
     
     // Recreate the legend with the appropriate mode

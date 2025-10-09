@@ -12,6 +12,10 @@ body {
     overflow: hidden;
 }
 
+body.potree-overlay-open {
+    overflow: hidden;
+}
+
 /* Header */
 .header {
     background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
@@ -43,14 +47,39 @@ body {
     padding: 8px 16px;
     text-decoration: none;
     font-size: 0.9rem;
-    transition: background-color 0.3s;
+    transition: background-color 0.3s ease, transform 0.2s ease;
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     cursor: pointer;
+    min-height: 36px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
-.view-3d-btn:hover {
+.view-3d-btn:hover,
+.view-3d-btn:focus {
     background-color: #45a049;
+    transform: translateY(-1px);
+}
+
+.view-3d-btn:focus {
+    outline: 2px solid rgba(69, 160, 73, 0.4);
+    outline-offset: 2px;
+}
+
+.view-3d-btn--secondary {
+    background-color: #ff6347;
+}
+
+.view-3d-btn--secondary:hover,
+.view-3d-btn--secondary:focus {
+    background-color: #ff4523;
+}
+
+.header-links .view-3d-btn + .view-3d-btn {
+    margin-left: 12px;
 }
 
 /* Main Container */
@@ -199,6 +228,212 @@ body {
 
 input:checked + .toggle-slider {
     background-color: #2196F3;
+}
+
+/* Potree Overlay */
+.potree-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(13, 18, 28, 0.75);
+    backdrop-filter: blur(8px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 4000;
+    transition: opacity 0.25s ease;
+    opacity: 1;
+}
+
+.potree-overlay.hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.potree-overlay-inner {
+    width: min(96vw, 1440px);
+    height: min(95vh, 900px);
+    background: #080b12;
+    border-radius: 18px;
+    box-shadow: 0 25px 80px rgba(0, 0, 0, 0.6);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.potree-overlay-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 1.5rem;
+    background: linear-gradient(160deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.02) 100%);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    color: #f3f6ff;
+    gap: 1rem;
+}
+
+.potree-overlay-toolbar h2 {
+    margin: 0;
+    font-size: 1.35rem;
+    letter-spacing: 0.03em;
+}
+
+.potree-overlay-subtitle {
+    margin: 0;
+    font-size: 0.85rem;
+    opacity: 0.65;
+}
+
+.potree-overlay-actions {
+    display: flex;
+    gap: 0.75rem;
+}
+
+.potree-overlay-btn {
+    border: none;
+    border-radius: 999px;
+    background: #2563eb;
+    color: #fff;
+    padding: 0.5rem 1.2rem;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.2s ease, transform 0.2s ease;
+    white-space: nowrap;
+}
+
+.potree-overlay-btn:hover,
+.potree-overlay-btn:focus {
+    background: #1d4ed8;
+    transform: translateY(-1px);
+    outline: none;
+}
+
+.potree-overlay-btn--ghost {
+    background: transparent;
+    color: #f3f6ff;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.potree-overlay-btn--ghost:hover,
+.potree-overlay-btn--ghost:focus {
+    background: rgba(255, 255, 255, 0.12);
+}
+
+.potree-overlay-body {
+    position: relative;
+    flex: 1;
+    background: radial-gradient(circle at top, rgba(37, 99, 235, 0.15), rgba(8, 11, 18, 0.95));
+}
+
+.potree-embed {
+    position: absolute;
+    inset: 0;
+}
+
+.potree_container {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    background: #000;
+}
+
+.potree-render-area {
+    width: calc(100% - 320px);
+    height: 100%;
+}
+
+.potree-sidebar {
+    width: 320px;
+    max-width: 30vw;
+    background: rgba(6, 9, 13, 0.85);
+    border-left: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+@media (max-width: 1200px) {
+    .potree-render-area {
+        width: 100%;
+    }
+
+    .potree-sidebar {
+        display: none;
+    }
+}
+
+.potree-loading {
+    position: absolute;
+    inset: 0;
+    background: rgba(5, 7, 11, 0.85);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    color: #f8fafc;
+    font-size: 1rem;
+    z-index: 10;
+    text-align: center;
+    padding: 2rem;
+}
+
+.potree-loading.hidden {
+    opacity: 0;
+    pointer-events: none;
+    visibility: hidden;
+}
+
+.potree-loading-spinner {
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    border: 4px solid rgba(148, 163, 184, 0.35);
+    border-top-color: #38bdf8;
+    animation: potreeSpin 0.85s linear infinite;
+}
+
+@keyframes potreeSpin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.potree-error {
+    position: absolute;
+    top: 1rem;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(239, 68, 68, 0.92);
+    color: #fff;
+    padding: 0.75rem 1.5rem;
+    border-radius: 999px;
+    box-shadow: 0 10px 30px rgba(239, 68, 68, 0.45);
+    z-index: 20;
+    font-weight: 600;
+}
+
+.potree-error.hidden {
+    display: none;
+}
+
+#potree_sidebar_container {
+    width: 100%;
+    height: 100%;
+}
+
+#potree_render_area {
+    width: 100%;
+    height: 100%;
+}
+
+.potree-overlay .potree_container {
+    background: transparent;
+}
+
+#potree_render_area canvas {
+    border-radius: 0;
 }
 
 input:checked + .toggle-slider:before {

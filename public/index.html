@@ -30,7 +30,7 @@
         <h1>La Mesa Ecopark: LiDAR Tree Species Identification</h1>
         <div class="header-links">
             <a href="/lamesa_3d_viewer.html" class="view-3d-btn" target="_blank">View 3D Model</a>
-            <a href="/lamesa_potree_viewer.html" class="view-3d-btn" style="margin-left: 10px; background-color: #FF6347;" target="_blank">View Direct 3D Viewer</a>
+            <button type="button" id="openPotreeBtn" class="view-3d-btn view-3d-btn--secondary">Open 3D Tree Viewer</button>
         </div>
     </header>
 
@@ -231,9 +231,38 @@
             </div>
         </div>
     </div>
+
+    <!-- Potree Inline Viewer Overlay -->
+    <div id="potreeOverlay" class="potree-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="potreeOverlayTitle">
+        <div class="potree-overlay-inner">
+            <div class="potree-overlay-toolbar">
+                <div>
+                    <h2 id="potreeOverlayTitle">La Mesa Forest · 3D Viewer</h2>
+                    <p class="potree-overlay-subtitle">Point cloud + tree crown overlays</p>
+                </div>
+                <div class="potree-overlay-actions">
+                    <button type="button" id="popOutPotree" class="potree-overlay-btn potree-overlay-btn--ghost" title="Open in new tab">Pop out</button>
+                    <button type="button" id="closePotreeOverlay" class="potree-overlay-btn" aria-label="Close 3D viewer">Close</button>
+                </div>
+            </div>
+            <div class="potree-overlay-body">
+                <div id="potreeLoading" class="potree-loading">
+                    <div class="potree-loading-spinner"></div>
+                    <p id="potreeLoadingText">Preparing 3D viewer…</p>
+                </div>
+                <div id="potreeError" class="potree-error hidden" role="alert"></div>
+                <div class="potree-embed">
+                    <div class="potree_container">
+                        <div id="potree_render_area" class="potree-render-area"></div>
+                        <div id="potree_sidebar_container" class="potree-sidebar"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
     
-    <!-- Your custom script is now the only one at the bottom -->
-    <script src="script.js"></script>
+    <script type="module" src="script.js"></script>
+    <script type="module" src="potree-viewer.js"></script>
 
 </body>
 </html>
