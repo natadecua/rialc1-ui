@@ -87,7 +87,7 @@ rialc1-ui/
 ├── raw_data/                # Source data including shapefiles, TIFFs, LAS files
 │   ├── crown_shp/           # Tree crown shapefiles
 │   ├── lamesa_processed.las # Sample LAS file
-│   └── prediction_results.csv # Model prediction results
+│   └── prediction_results_top5.csv # Model prediction results for top 5 species
 ├── Potree_1.8.2/            # Potree library for 3D point cloud rendering
 ├── server.js                # Node.js/Express server
 └── TILE_MANAGEMENT.md       # Documentation for tile generation and management

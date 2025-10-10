@@ -54,7 +54,7 @@ See `TILE_MANAGEMENT.md` for details on the tile generation process and manageme
 - `shapefiles/`: Additional shapefiles related to the La Mesa Ecopark.
 - `lamesa_processed.las`: The LiDAR point cloud data in LAS format.
 - `lamesa_processed.copc.laz`: A cloud-optimized point cloud version of the LiDAR data.
-- `prediction_results.csv`: Results from the machine learning model with tree classifications.
+- `prediction_results_top5.csv`: Results from the machine learning model with tree classifications for the top 5 most common species.
 - Other supporting data files like GeoTIFFs and metadata.
 
 ### Potree Library (`Potree_1.8.2/`)

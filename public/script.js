@@ -12,6 +12,11 @@ let map;
 let treeLayers = L.layerGroup(); // Use a layer group for tree polygons
 let predictionData = []; // Store prediction data from CSV
 let isPredictionMode = false; // Toggle between species view and prediction view
+let lastFocusedElement = null;
+let groupToSpeciesMapping = {}; // Store the mapping of group to species name
+
+const FOCUSABLE_SELECTOR = 'a[href], button:not([disabled]), textarea, input:not([disabled]):not([type="hidden"]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+const focusTrapRegistry = new WeakMap();
 
 const colorHelper = createSpeciesColorHelper();
 
@@ -22,52 +27,131 @@ function getSpeciesColor(species, treeId) {
     });
 }
 
+function getFocusableElements(container) {
+    return Array.from(container.querySelectorAll(FOCUSABLE_SELECTOR))
+        .filter(element => {
+            const isDisabled = element.hasAttribute('disabled') || element.getAttribute('aria-disabled') === 'true';
+            if (isDisabled) return false;
+            if (element.getAttribute('tabindex') === '-1') return false;
+            if (element.offsetParent === null && element !== document.activeElement) return false;
+            return true;
+        });
+}
+
+function activateFocusTrap(container, onEscape) {
+    const existing = focusTrapRegistry.get(container);
+    if (existing) {
+        focusTrapRegistry.set(container, { ...existing, onEscape });
+        return;
+    }
+
+    const previousTabIndex = container.getAttribute('tabindex');
+    if (previousTabIndex === null) {
+        container.setAttribute('tabindex', '-1');
+    }
+
+    const handler = (event) => {
+        if (event.key === 'Tab') {
+            const focusable = getFocusableElements(container);
+            if (focusable.length === 0) {
+                event.preventDefault();
+                container.focus();
+                return;
+            }
+
+            const first = focusable[0];
+            const last = focusable[focusable.length - 1];
+
+            if (event.shiftKey) {
+                if (document.activeElement === first || document.activeElement === container) {
+                    event.preventDefault();
+                    last.focus();
+                }
+            } else if (document.activeElement === last) {
+                event.preventDefault();
+                first.focus();
+            }
+        } else if (event.key === 'Escape') {
+            event.preventDefault();
+            const trap = focusTrapRegistry.get(container);
+            trap?.onEscape?.();
+        }
+    };
+
+    container.addEventListener('keydown', handler);
+    focusTrapRegistry.set(container, { previousTabIndex, handler, onEscape });
+
+    const focusable = getFocusableElements(container);
+    (focusable[0] ?? container).focus();
+}
+
+function releaseFocusTrap(container) {
+    const trap = focusTrapRegistry.get(container);
+    if (!trap) {
+        return;
+    }
+
+    container.removeEventListener('keydown', trap.handler);
+
+    if (trap.previousTabIndex === null) {
+        container.removeAttribute('tabindex');
+    } else {
+        container.setAttribute('tabindex', trap.previousTabIndex);
+    }
+
+    focusTrapRegistry.delete(container);
+}
+
 // Toggle between normal view and prediction view
-function togglePredictionMode() {
-    isPredictionMode = document.getElementById('predictionModeToggle').checked;
-    
-    console.log("Prediction mode:", isPredictionMode ? "ON" : "OFF");
-    
-    // Update filter UI elements based on mode
+function togglePredictionMode(forceState) {
+    const toggleButton = document.getElementById('predictionModeToggle');
+    if (!toggleButton) {
+        return;
+    }
+
+    if (typeof forceState === 'boolean') {
+        isPredictionMode = forceState;
+    } else {
+        isPredictionMode = toggleButton.getAttribute('aria-checked') === 'true';
+    }
+
+    toggleButton.setAttribute('aria-checked', String(isPredictionMode));
+    toggleButton.setAttribute('aria-label', isPredictionMode ? 'Switch to species display mode' : 'Switch to prediction display mode');
+
+    console.log('Prediction mode:', isPredictionMode ? 'ON' : 'OFF');
+
     const speciesFilters = document.getElementById('speciesFilters');
     const predictionFilters = document.getElementById('predictionFilters');
-    
+
     if (speciesFilters) {
         speciesFilters.style.display = isPredictionMode ? 'none' : 'block';
     }
-    
+
     if (predictionFilters) {
         predictionFilters.style.display = isPredictionMode ? 'block' : 'none';
-        
-        // Update filter checkboxes based on data availability
+
         if (isPredictionMode) {
             const hasCorrect = predictionData.some(p => !p.isTraining && p.correct);
             const hasIncorrect = predictionData.some(p => !p.isTraining && !p.correct);
             const hasTraining = predictionData.some(p => p.isTraining);
-            
+
             const correctCheck = document.getElementById('filterCorrect');
             const incorrectCheck = document.getElementById('filterIncorrect');
             const trainingCheck = document.getElementById('filterTraining');
-            
+
             if (correctCheck) correctCheck.disabled = !hasCorrect;
             if (incorrectCheck) incorrectCheck.disabled = !hasIncorrect;
             if (trainingCheck) trainingCheck.disabled = !hasTraining;
         }
     }
-    
-    // Check if we have any prediction data
+
     if (isPredictionMode && predictionData.length === 0) {
-        console.warn("No prediction data available");
-        alert("No prediction data available. Please check that the prediction_results.csv file is present.");
+        console.warn('No prediction data available');
+        alert('No prediction data available. Please check that the prediction_results.csv file is present.');
     }
-    
-    // Update the map with new coloring
+
     addTreesToMap();
-    
-    // Update the table with prediction info
     populateResultsTable();
-    
-    // Update the legend to show prediction colors instead of species colors
     updateLegendForPredictionMode();
 }
 
@@ -90,15 +174,34 @@ document.addEventListener('DOMContentLoaded', async function() {
     setupEventListeners();
     await loadData();
     
-    // Load prediction data
-    predictionData = await loadPredictionData();
+    // Load prediction data AFTER shapefile data is loaded, passing the tree data for species mapping
+    predictionData = await loadPredictionData('/raw_data/prediction_results_top5.csv', originalTreeData);
     console.log(`Loaded ${predictionData.length} prediction records`);
+    
+    // Create a summary of which species each group represents and store it globally
+    if (predictionData.length > 0) {
+        predictionData.forEach(tree => {
+            const group = tree.actualGroup;
+            if (group && !groupToSpeciesMapping[group]) {
+                groupToSpeciesMapping[group] = tree.actual;
+            }
+        });
+        console.log('Group to Species Summary:', groupToSpeciesMapping);
+        
+        // Update the modal with actual species information
+        updateGroupInfoModal();
+    }
     
     // Log the first few prediction records for debugging
     if (predictionData.length > 0) {
         console.log("Sample prediction records:");
         for (let i = 0; i < Math.min(5, predictionData.length); i++) {
-            console.log(`Tree ${predictionData[i].treeId}: ${predictionData[i].actual} → ${predictionData[i].predicted} (${predictionData[i].correct ? 'Correct' : 'Incorrect'})`);
+            const record = predictionData[i];
+            if (record.isTraining) {
+                console.log(`Tree ${record.treeId}: ${record.actual} (Training)`);
+            } else {
+                console.log(`Tree ${record.treeId}: ${record.actual} → ${record.predicted} (${record.correct ? 'Correct' : 'Incorrect'})`);
+            }
         }
     }
 });
@@ -349,14 +452,31 @@ function createSpeciesLegend() {
                 groupExplanation.style.fontSize = '11px';
                 groupExplanation.style.marginTop = '8px';
                 groupExplanation.style.color = '#555';
-                groupExplanation.innerHTML = `
-                    <strong>Tree Groups:</strong><br>
-                    1: Rosids - 544 trees<br>
-                    2: Basals - 155 trees<br>
-                    3: Asterids - 166 trees<br>
-                    4: Monocots - 77 trees<br>
-                    5: Others - 109 trees
-                `;
+                
+                // Count trees by group and collect species names
+                const groupInfo = {};
+                predictionData.forEach(tree => {
+                    const group = tree.actualGroup || 'Unknown';
+                    if (!groupInfo[group]) {
+                        groupInfo[group] = {
+                            count: 0,
+                            species: tree.actual
+                        };
+                    }
+                    groupInfo[group].count++;
+                });
+                
+                let groupText = '<strong>Species Groups (Top 5):</strong><br>';
+                for (let i = 1; i <= 5; i++) {
+                    const info = groupInfo[i.toString()];
+                    if (info) {
+                        // Extract species name (remove "Group X" if it's still there)
+                        const speciesName = info.species.includes('Group') ? info.species : info.species;
+                        groupText += `Group ${i}: ${speciesName} (${info.count})<br>`;
+                    }
+                }
+                
+                groupExplanation.innerHTML = groupText;
                 div.appendChild(groupExplanation);
                 
                 // Add ratio information
@@ -465,16 +585,80 @@ function updateLegendForPredictionMode() {
 }
 
 /**
+ * Update the Group Info Modal with actual species names
+ */
+function updateGroupInfoModal() {
+    const modalBody = document.getElementById('groupInfoModalDescription');
+    if (!modalBody) return;
+    
+    // Count trees per group
+    const groupCounts = {};
+    predictionData.forEach(tree => {
+        const group = tree.actualGroup;
+        if (group) {
+            groupCounts[group] = (groupCounts[group] || 0) + 1;
+        }
+    });
+    
+    let modalContent = '<p>Trees in the La Mesa Eco Park were classified into five (5) groups representing the top 5 most common tree species in the park:</p>';
+    
+    for (let i = 1; i <= 5; i++) {
+        const groupKey = i.toString();
+        const speciesName = groupToSpeciesMapping[groupKey] || `Group ${i}`;
+        const count = groupCounts[groupKey] || 0;
+        
+        if (count > 0) {
+            modalContent += `
+                <section>
+                    <h3>Group ${i}: ${speciesName} (${count} trees)</h3>
+                    <p>The ${i === 1 ? 'most' : i === 2 ? 'second most' : i === 3 ? 'third most' : i === 4 ? 'fourth most' : 'fifth most'} common tree species in the dataset.</p>
+                </section>
+            `;
+        }
+    }
+    
+    modalContent += `
+        <p style="margin-top: 20px; font-style: italic; color: #666;">
+            Note: These groups are based on the top 5 most frequently occurring species in the park.
+        </p>
+    `;
+    
+    modalBody.innerHTML = modalContent;
+}
+
+/**
  * Sets up all event listeners for UI elements.
  */
 function setupEventListeners() {
-    document.getElementById('panelToggle').addEventListener('click', () => {
-        document.getElementById('sidePanel').classList.toggle('collapsed');
-        // When the panel is toggled, tell Leaflet to re-check its size.
-        setTimeout(() => {
-            map.invalidateSize({ animate: true });
-        }, 300); // Delay matches typical CSS transition time.
-    });
+    const panelToggle = document.getElementById('panelToggle');
+    const sidePanel = document.getElementById('sidePanel');
+
+    if (panelToggle && sidePanel) {
+        const updatePanelState = (collapsed) => {
+            panelToggle.setAttribute('aria-expanded', String(!collapsed));
+            const icon = panelToggle.querySelector('[aria-hidden="true"]');
+            if (icon) {
+                icon.textContent = collapsed ? '▶' : '◀';
+            }
+        };
+
+        panelToggle.addEventListener('click', () => {
+            const collapsed = sidePanel.classList.toggle('collapsed');
+            updatePanelState(collapsed);
+            setTimeout(() => {
+                map.invalidateSize({ animate: true });
+            }, 300);
+        });
+
+        panelToggle.addEventListener('keydown', (event) => {
+            if (event.key === ' ' || event.key === 'Enter') {
+                event.preventDefault();
+                panelToggle.click();
+            }
+        });
+
+        updatePanelState(sidePanel.classList.contains('collapsed'));
+    }
 
     // Enable prediction filters
     ['filterCorrect', 'filterIncorrect', 'filterTraining'].forEach(id => {
@@ -514,7 +698,19 @@ function setupEventListeners() {
         // Add prediction toggle switch
         const predictionToggleElem = document.getElementById('predictionModeToggle');
         if (predictionToggleElem) {
-            predictionToggleElem.addEventListener('change', togglePredictionMode);
+            const handlePredictionToggle = () => {
+                const next = predictionToggleElem.getAttribute('aria-checked') !== 'true';
+                togglePredictionMode(next);
+            };
+
+            predictionToggleElem.addEventListener('click', handlePredictionToggle);
+
+            predictionToggleElem.addEventListener('keydown', (event) => {
+                if (event.key === ' ' || event.key === 'Enter') {
+                    event.preventDefault();
+                    handlePredictionToggle();
+                }
+            });
         }
     }
 
@@ -536,29 +732,52 @@ function setupEventListeners() {
     const closeGroupModal = document.getElementById('closeGroupModal');
     const closeModalBtn = document.getElementById('closeModalBtn');
     
+    if (groupInfoModal) {
+        groupInfoModal.setAttribute('aria-hidden', 'true');
+    }
+
+    const closeGroupModalDialog = () => {
+        if (!groupInfoModal) return;
+        groupInfoModal.classList.remove('show');
+        groupInfoModal.setAttribute('aria-hidden', 'true');
+        releaseFocusTrap(groupInfoModal);
+        if (lastFocusedElement && typeof lastFocusedElement.focus === 'function') {
+            lastFocusedElement.focus();
+        }
+    };
+
+    const openGroupModalDialog = () => {
+        if (!groupInfoModal) return;
+        lastFocusedElement = document.activeElement;
+        groupInfoModal.classList.add('show');
+        groupInfoModal.setAttribute('aria-hidden', 'false');
+        activateFocusTrap(groupInfoModal, closeGroupModalDialog);
+    };
+    
     if (showGroupInfoBtn) {
         showGroupInfoBtn.addEventListener('click', () => {
-            groupInfoModal.style.display = 'block';
+            openGroupModalDialog();
         });
     }
     
     if (closeGroupModal) {
-        closeGroupModal.addEventListener('click', () => {
-            groupInfoModal.style.display = 'none';
-        });
+        closeGroupModal.addEventListener('click', closeGroupModalDialog);
     }
     
     if (closeModalBtn) {
-        closeModalBtn.addEventListener('click', () => {
-            groupInfoModal.style.display = 'none';
-        });
+        closeModalBtn.addEventListener('click', closeGroupModalDialog);
     }
     
-    window.addEventListener('click', (event) => {
-        if (event.target === groupInfoModal) {
-            groupInfoModal.style.display = 'none';
-        }
-    });
+    if (groupInfoModal) {
+        groupInfoModal.addEventListener('click', (event) => {
+            if (event.target === groupInfoModal) {
+                closeGroupModalDialog();
+            }
+        });
+    }
+
+    // Initialize toggle aria-labels
+    togglePredictionMode(false);
 }
 
 /**

@@ -1,9 +1,5 @@
 export const speciesColors = {
-  Rosids: '#e41a1c',
-  Basals: '#377eb8',
-  Asterids: '#4daf4a',
-  Monocots: '#984ea3',
-  Others: '#ff7f00',
+  // Keep Unknown and default
   Unknown: '#a65628',
   default: '#ffc107',
 };

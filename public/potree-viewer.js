@@ -27,11 +27,11 @@ const POTREE_RESOURCES = {
 };
 
 const GROUP_DEFINITIONS = [
-  { id: 1, name: 'Group 1 · Rosids', color: '#22c55e' },
-  { id: 2, name: 'Group 2 · Basals', color: '#f97316' },
-  { id: 3, name: 'Group 3 · Asterids', color: '#0ea5e9' },
-  { id: 4, name: 'Group 4 · Monocots', color: '#a855f7' },
-  { id: 5, name: 'Group 5 · Others', color: '#facc15' }
+  { id: 1, name: 'Group 1 · Top Species', color: '#22c55e' },
+  { id: 2, name: 'Group 2 · Top Species', color: '#f97316' },
+  { id: 3, name: 'Group 3 · Top Species', color: '#0ea5e9' },
+  { id: 4, name: 'Group 4 · Top Species', color: '#a855f7' },
+  { id: 5, name: 'Group 5 · Top Species', color: '#facc15' }
 ];
 
 const FALLBACK_GROUP = { id: 0, name: 'Group 0 · Unclassified', color: '#94a3b8' };
@@ -53,6 +53,85 @@ const potreeState = {
   pointCloudMetadata: null,
   heightHints: null
 };
+
+const OVERLAY_FOCUSABLE_SELECTOR = 'a[href], button:not([disabled]), textarea, input:not([disabled]):not([type="hidden"]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+const overlayFocusTrap = new WeakMap();
+let lastFocusedElement = null;
+
+function getOverlayFocusableElements(container) {
+  return Array.from(container.querySelectorAll(OVERLAY_FOCUSABLE_SELECTOR))
+    .filter((element) => {
+      const disabled = element.hasAttribute('disabled') || element.getAttribute('aria-disabled') === 'true';
+      if (disabled) return false;
+      if (element.getAttribute('tabindex') === '-1') return false;
+      if (element.offsetParent === null && element !== document.activeElement) return false;
+      return true;
+    });
+}
+
+function activateOverlayFocusTrap(container, onEscape) {
+  const existing = overlayFocusTrap.get(container);
+  if (existing) {
+    overlayFocusTrap.set(container, { ...existing, onEscape });
+    return;
+  }
+
+  const previousTabIndex = container.getAttribute('tabindex');
+  if (previousTabIndex === null) {
+    container.setAttribute('tabindex', '-1');
+  }
+
+  const handler = (event) => {
+    if (event.key === 'Tab') {
+      const focusable = getOverlayFocusableElements(container);
+      if (focusable.length === 0) {
+        event.preventDefault();
+        container.focus();
+        return;
+      }
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+
+      if (event.shiftKey) {
+        if (document.activeElement === first || document.activeElement === container) {
+          event.preventDefault();
+          last.focus();
+        }
+      } else if (document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      const trap = overlayFocusTrap.get(container);
+      trap?.onEscape?.();
+    }
+  };
+
+  container.addEventListener('keydown', handler);
+  overlayFocusTrap.set(container, { previousTabIndex, handler, onEscape });
+
+  const focusable = getOverlayFocusableElements(container);
+  (focusable[0] ?? container).focus();
+}
+
+function releaseFocusTrap(container) {
+  const trap = overlayFocusTrap.get(container);
+  if (!trap) {
+    return;
+  }
+
+  container.removeEventListener('keydown', trap.handler);
+
+  if (trap.previousTabIndex === null) {
+    container.removeAttribute('tabindex');
+  } else {
+    container.setAttribute('tabindex', trap.previousTabIndex);
+  }
+
+  overlayFocusTrap.delete(container);
+}
 
 const resourcePromises = new Map();
 
@@ -257,25 +336,26 @@ function prepareProjections() {
     proj4.defs('EPSG:3123', '+proj=tmerc +lat_0=0 +lon_0=121 +k=0.99995 +x_0=500000 +y_0=0 +ellps=clrk66 +towgs84=-127.62,-67.24,-47.04,-3.068,4.903,1.578,-1.06 +units=m +no_defs');
   }
 
+  // Define pointcloud projection - using UTM Zone 51N for Philippines (matches view_lamesa.html)
   if (!proj4.defs('pointcloud')) {
-    proj4.defs('pointcloud', '+proj=tmerc +lat_0=0 +lon_0=121 +k=0.99995 +x_0=500000 +y_0=0 +ellps=clrk66 +towgs84=-127.62,-67.24,-47.04,-3.068,4.903,1.578,-1.06 +units=m +no_defs');
+    proj4.defs('pointcloud', '+proj=utm +zone=51 +datum=WGS84 +units=m +no_defs');
   }
 }
 
 function createLineMaterial(color, viewer) {
   const lineMaterial = new LineMaterial({
     color: new THREE.Color(color),
-    linewidth: 2.4,
+    linewidth: 3.0, // Increased from 2.4 for better visibility
     transparent: true,
-    opacity: 0.85,
+    opacity: 0.95, // Increased from 0.85 for better visibility
   });
 
   const size = viewer.renderer.getSize(new THREE.Vector2());
   lineMaterial.resolution.set(size.width, size.height);
-  lineMaterial.depthTest = false;
+  lineMaterial.depthTest = true; // Changed from false - proper depth testing
   lineMaterial.polygonOffset = true;
-  lineMaterial.polygonOffsetFactor = -1;
-  lineMaterial.polygonOffsetUnits = 1;
+  lineMaterial.polygonOffsetFactor = -2; // Changed from -1 for better layering
+  lineMaterial.polygonOffsetUnits = -2; // Changed from 1
 
   return lineMaterial;
 }
@@ -284,6 +364,7 @@ async function loadTreeCrownOverlays(viewer, pointcloud, heightHints = {}) {
   prepareProjections();
 
   const loader = new Potree.ShapefileLoader();
+  // Transform from EPSG:3123 (shapefile) to UTM Zone 51N (pointcloud)
   const shapefileToPointcloud = proj4('EPSG:3123', 'pointcloud');
   loader.transform = shapefileToPointcloud;
 
@@ -344,16 +425,18 @@ async function loadTreeCrownOverlays(viewer, pointcloud, heightHints = {}) {
   );
   const hoverSpeed = 0.6;
 
-  let crownBaseHeight = canopyTop - Math.max(spacing * 0.3, hoverAmplitude * 1.2);
-  if (!Number.isFinite(crownBaseHeight)) {
-    crownBaseHeight = canopyBottom + canopyHeight * 0.85;
-  }
-
-  const minimumCeiling = canopyTop - Math.max(spacing * 0.2, hoverAmplitude * 0.5);
-  const minimumFloor = canopyBottom + Math.max(spacing * 0.5, canopyHeight * 0.6);
-
-  const clampedCeiling = Math.max(minimumFloor, minimumCeiling);
-  crownBaseHeight = Math.max(Math.min(crownBaseHeight, clampedCeiling), minimumFloor);
+  // Place crown base height above the canopy top so they're visible
+  // Add some spacing above the canopy to ensure shapefiles are visible
+  let crownBaseHeight = canopyTop + spacing * 2; // Elevated above the point cloud
+  
+  console.log('[Potree] Height settings:', {
+    canopyTop,
+    canopyBottom,
+    canopyHeight,
+    crownBaseHeight,
+    spacing,
+    hoverAmplitude
+  });
 
   const groups = [...GROUP_DEFINITIONS, FALLBACK_GROUP].map((group) => {
     const material = createLineMaterial(group.color, viewer);
@@ -488,7 +571,7 @@ async function initializePotreeViewer() {
       viewer.setLanguage('en');
       $('#menu_tools').next().show();
       $('#menu_scene').next().show();
-      viewer.toggleSidebar();
+      viewer.toggleSidebar(); // Toggle to show the sidebar
     });
 
     const pointCloudPromise = new Promise((resolve, reject) => {
@@ -506,15 +589,7 @@ async function initializePotreeViewer() {
             const material = pointcloud.material;
             material.pointSizeType = Potree.PointSizeType.ADAPTIVE;
             material.size = 1.0;
-
-            const availableAttributes = material?.attributes || {};
-            if (availableAttributes.rgba) {
-              material.activeAttributeName = 'rgba';
-            } else if (availableAttributes.rgb) {
-              material.activeAttributeName = 'rgb';
-            } else if ('intensity' in availableAttributes) {
-              material.activeAttributeName = 'intensity';
-            }
+            material.activeAttributeName = "rgba"; // Set to rgba for RGB color display
 
             if (Potree.PointColorType?.RGB) {
               material.pointColorType = Potree.PointColorType.RGB;
@@ -601,7 +676,8 @@ function refreshViewerLayout() {
   }
   viewer.mapView?.map?.updateSize?.();
 
-  window.dispatchEvent(new Event('resize'));
+  // Don't dispatch resize event here - it causes infinite loop
+  // window.dispatchEvent(new Event('resize'));
 }
 
 function bindOverlayEvents() {
@@ -614,13 +690,30 @@ function bindOverlayEvents() {
     return;
   }
 
+  overlay.setAttribute('aria-hidden', 'true');
+
+  const closeOverlay = () => {
+    overlay.classList.add('hidden');
+    overlay.setAttribute('aria-hidden', 'true');
+    document.body.classList.remove('potree-overlay-open');
+    hideError();
+    hideLoading();
+    releaseFocusTrap(overlay);
+    if (typeof lastFocusedElement?.focus === 'function') {
+      lastFocusedElement.focus();
+    }
+  };
+
   openBtn.addEventListener('click', async (event) => {
     event.preventDefault();
 
+    lastFocusedElement = event.currentTarget;
     overlay.classList.remove('hidden');
+    overlay.setAttribute('aria-hidden', 'false');
     document.body.classList.add('potree-overlay-open');
     showLoading();
     hideError();
+  activateOverlayFocusTrap(overlay, closeOverlay);
 
     try {
       await initializePotreeViewer();
@@ -634,11 +727,7 @@ function bindOverlayEvents() {
     }
   });
 
-  closeBtn.addEventListener('click', () => {
-    overlay.classList.add('hidden');
-    document.body.classList.remove('potree-overlay-open');
-    hideError();
-  });
+  closeBtn.addEventListener('click', closeOverlay);
 
   if (popOutBtn) {
     popOutBtn.addEventListener('click', () => {
@@ -652,8 +741,7 @@ function bindOverlayEvents() {
 
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape' && !overlay.classList.contains('hidden')) {
-      overlay.classList.add('hidden');
-      document.body.classList.remove('potree-overlay-open');
+      closeOverlay();
     }
   });
 }

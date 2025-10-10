@@ -26,16 +26,16 @@
 </head>
 <body>
     <!-- Header -->
-    <header class="header">
+    <header class="header" role="banner">
         <h1>La Mesa Ecopark: LiDAR Tree Species Identification</h1>
         <div class="header-links">
-            <a href="/lamesa_3d_viewer.html" class="view-3d-btn" target="_blank">View 3D Model</a>
-            <button type="button" id="openPotreeBtn" class="view-3d-btn view-3d-btn--secondary">Open 3D Tree Viewer</button>
+            <a href="/lamesa_3d_viewer.html" class="view-3d-btn" target="_blank" title="Open the LiDAR point cloud viewer in a new tab">View 3D Model</a>
+            <button type="button" id="openPotreeBtn" class="view-3d-btn view-3d-btn--secondary" aria-haspopup="dialog" aria-controls="potreeOverlay" title="Open the inline 3D viewer with keyboard and mouse controls">Open 3D Tree Viewer</button>
         </div>
     </header>
 
     <!-- Main Container -->
-    <div class="container">
+    <main class="container" role="main">
         <!-- Map Container -->
         <div class="map-container">
             <div id="map"></div>
@@ -63,40 +63,40 @@
                     <!-- Display Mode Toggle -->
                     <div class="display-mode-toggle">
                         <label>Display Mode:</label>
-                        <div class="toggle-switch-container">
-                            <span class="toggle-label">Species</span>
-                            <label class="toggle-switch">
-                                <input type="checkbox" id="predictionModeToggle">
-                                <span class="toggle-slider"></span>
-                            </label>
-                            <span class="toggle-label">Predictions</span>
+                        <div class="toggle-switch-container" role="group" aria-label="Toggle between species and prediction coloring">
+                            <span class="toggle-label" id="displayModeSpeciesLabel">Species</span>
+                            <button type="button" id="predictionModeToggle" class="toggle-switch-btn" role="switch" aria-checked="false" aria-labelledby="displayModeSpeciesLabel displayModePredictionsLabel" data-tooltip="Switch to highlight model predictions" data-tooltip-position="top">
+                                <span class="toggle-slider" aria-hidden="true"></span>
+                            </button>
+                            <span class="toggle-label" id="displayModePredictionsLabel">Predictions</span>
                         </div>
                     </div>
                     
                     <!-- Tree Filters -->
                     <div id="speciesFilters">
                         <label>
-                            <input type="checkbox" id="filterUnknownSpecies" checked>
+                            <input type="checkbox" id="filterUnknownSpecies" checked aria-describedby="filterUnknownSpeciesHint" title="Toggle to include or hide trees without a known species label">
                             Hide Unknown Species
                         </label>
+                        <p id="filterUnknownSpeciesHint" class="sr-only">When checked, trees without a common name are hidden from the map and results table.</p>
                     </div>
                     
                     <!-- Prediction Filters (initially hidden) -->
                     <div id="predictionFilters" style="display: none;">
                         <label>
-                            <input type="checkbox" id="filterCorrect" checked>
+                            <input type="checkbox" id="filterCorrect" checked title="Display trees the model classified correctly" aria-label="Show correctly classified trees">
                             Show Correct Predictions
                         </label>
                         <label>
-                            <input type="checkbox" id="filterIncorrect" checked>
+                            <input type="checkbox" id="filterIncorrect" checked title="Display trees the model classified incorrectly" aria-label="Show incorrectly classified trees">
                             Show Incorrect Predictions
                         </label>
                         <label>
-                            <input type="checkbox" id="filterTraining" checked>
+                            <input type="checkbox" id="filterTraining" checked title="Display trees used for model training" aria-label="Show training trees">
                             Show Training Trees
                         </label>
                         <div style="margin-top: 10px;">
-                            <button id="showGroupInfoBtn" style="padding: 5px 10px; background: #4CAF50; color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 12px; width: 100%;">
+                            <button id="showGroupInfoBtn" style="padding: 5px 10px; background: #4CAF50; color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 12px; width: 100%;" aria-haspopup="dialog" aria-controls="groupInfoModal">
                                 View Tree Group Information
                             </button>
                         </div>
@@ -107,10 +107,20 @@
 
         <!-- Side Panel -->
         <div class="side-panel" id="sidePanel">
-            <div class="panel-toggle" id="panelToggle">
-                ◀
-            </div>
+            <button type="button" class="panel-toggle" id="panelToggle" aria-expanded="true" aria-controls="sidePanel" title="Collapse or expand insights panel">
+                <span aria-hidden="true">◀</span>
+                <span class="sr-only">Toggle insights panel</span>
+            </button>
             <div class="panel-content">
+                <section class="onboarding-section" aria-label="Getting started hints">
+                    <h3>Quick Start</h3>
+                    <ul>
+                        <li>Use the <strong>Display Mode</strong> switch to compare species coloring with model predictions.</li>
+                        <li>Press <kbd>Tab</kbd> to move between filters, then hit <kbd>Space</kbd> to toggle them.</li>
+                        <li>Select any tree row to focus the map or open the 3D viewer for a full point cloud experience.</li>
+                    </ul>
+                </section>
+
                 <!-- Performance Metrics Section -->
                 <section class="performance-section">
                     <h3>Model Performance</h3>
@@ -138,13 +148,13 @@
                 <section class="status-section">
                     <h3>Data Status</h3>
                     <div class="status-item">
-                        <div id="shapefileStatus">⏳ Loading shapefiles...</div>
+                        <div id="shapefileStatus" role="status" aria-live="polite">⏳ Loading shapefiles...</div>
                     </div>
                     <div class="status-item">
-                        <div id="rasterStatus">✔️ Raster served from backend</div>
+                        <div id="rasterStatus" role="status" aria-live="polite">✔️ Raster served from backend</div>
                     </div>
                     <div class="status-item">
-                        <div id="dataStatus">Initializing...</div>
+                        <div id="dataStatus" role="status" aria-live="polite">Initializing...</div>
                     </div>
                 </section>
 
@@ -158,10 +168,10 @@
                 </section>
 
                 <!-- Results Section -->
-                <section class="results-section">
+                <section class="results-section" aria-live="polite">
                     <h3>Tree Classification Results</h3>
                     <div class="search-container">
-                        <input type="text" id="searchInput" placeholder="Search trees...">
+                        <input type="text" id="searchInput" placeholder="Search trees..." aria-label="Search trees by ID or species">
                     </div>
                     <div class="table-container">
                         <table id="resultsTable">
@@ -197,6 +207,7 @@
             </div>
         </div>
     </div>
+    </main>
 
     <!-- Loading Indicator -->
     <div id="loadingIndicator" class="loading">
@@ -205,35 +216,52 @@
     </div>
     
     <!-- Tree Group Information Modal -->
-    <div id="groupInfoModal" style="display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.7);">
-        <div style="background-color: white; margin: 10% auto; padding: 20px; width: 80%; max-width: 800px; max-height: 80vh; overflow-y: auto; border-radius: 5px;">
-            <span id="closeGroupModal" style="color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer;">&times;</span>
-            <h2 style="margin-top: 0;">Tree Group Information</h2>
-            <p>Trees in the La Mesa Eco Park were classified into five (5) taxonomic groups:</p>
-            
-            <h3>Group 1: Rosids (544 trees)</h3>
-            <p>Includes species like Samanea saman (Rain Tree), Swietenia mahagoni (Mahogany), Pterocarpus indicus (Narra), and many others.</p>
-            
-            <h3>Group 2: Basals (155 trees)</h3>
-            <p>Includes species like Macaranga tanarius, Chrysophyllum cainito, and Terminalia catappa.</p>
-            
-            <h3>Group 3: Asterids (166 trees)</h3>
-            <p>Includes species like Tectona grandis (Teak), Gmelina arborea (Yemane), and Vitex parviflora.</p>
-            
-            <h3>Group 4: Monocots (77 trees)</h3>
-            <p>Includes various palm species like Adonidia merrillii and other monocotyledon plants.</p>
-            
-            <h3>Group 5: Others (109 trees)</h3>
-            <p>Species that don't fit into the other taxonomic groups.</p>
-            
-            <div style="margin-top: 20px;">
-                <button id="closeModalBtn" style="padding: 8px 15px; background-color: #4CAF50; color: white; border: none; border-radius: 3px; cursor: pointer;">Close</button>
+    <div id="groupInfoModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="groupInfoModalTitle" aria-describedby="groupInfoModalDescription" tabindex="-1" aria-hidden="true">
+        <div class="modal-content group-modal" role="document">
+            <header class="modal-header">
+                <h2 id="groupInfoModalTitle">Tree Group Information</h2>
+                <button type="button" id="closeGroupModal" class="modal-close" aria-label="Close tree group information">&times;</button>
+            </header>
+            <div class="modal-body" id="groupInfoModalDescription">
+                <p>Trees in the La Mesa Eco Park were classified into five (5) groups representing the top 5 most common tree species in the park:</p>
+
+                <section>
+                    <h3>Group 1: Most Common Species</h3>
+                    <p>The most frequently occurring tree species in La Mesa Eco Park.</p>
+                </section>
+
+                <section>
+                    <h3>Group 2: Second Most Common Species</h3>
+                    <p>The second most frequently occurring tree species.</p>
+                </section>
+
+                <section>
+                    <h3>Group 3: Third Most Common Species</h3>
+                    <p>The third most frequently occurring tree species.</p>
+                </section>
+
+                <section>
+                    <h3>Group 4: Fourth Most Common Species</h3>
+                    <p>The fourth most frequently occurring tree species.</p>
+                </section>
+
+                <section>
+                    <h3>Group 5: Fifth Most Common Species</h3>
+                    <p>The fifth most frequently occurring tree species.</p>
+                </section>
+                
+                <p style="margin-top: 20px; font-style: italic; color: #666;">
+                    Note: These groups are based on frequency of occurrence rather than taxonomic classification.
+                </p>
             </div>
+            <footer class="modal-footer">
+                <button id="closeModalBtn" class="modal-primary-btn" type="button">Close</button>
+            </footer>
         </div>
     </div>
 
     <!-- Potree Inline Viewer Overlay -->
-    <div id="potreeOverlay" class="potree-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="potreeOverlayTitle">
+    <div id="potreeOverlay" class="potree-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="potreeOverlayTitle" tabindex="-1" aria-hidden="true">
         <div class="potree-overlay-inner">
             <div class="potree-overlay-toolbar">
                 <div>
@@ -251,6 +279,27 @@
                     <p id="potreeLoadingText">Preparing 3D viewer…</p>
                 </div>
                 <div id="potreeError" class="potree-error hidden" role="alert"></div>
+                <aside class="potree-controls-legend" aria-label="Potree navigation quick reference">
+                    <h3>3D Controls</h3>
+                    <dl>
+                        <div>
+                            <dt>Left Mouse / Touch Drag</dt>
+                            <dd>Orbit around the point cloud</dd>
+                        </div>
+                        <div>
+                            <dt>Right Mouse / Two-Finger Drag</dt>
+                            <dd>Pan across the scene</dd>
+                        </div>
+                        <div>
+                            <dt>Scroll / Pinch</dt>
+                            <dd>Zoom in and out</dd>
+                        </div>
+                        <div>
+                            <dt>F</dt>
+                            <dd>Frame the selected area</dd>
+                        </div>
+                    </dl>
+                </aside>
                 <div class="potree-embed">
                     <div class="potree_container">
                         <div id="potree_render_area" class="potree-render-area"></div>
@@ -263,6 +312,5 @@
     
     <script type="module" src="script.js"></script>
     <script type="module" src="potree-viewer.js"></script>
-
 </body>
 </html>
