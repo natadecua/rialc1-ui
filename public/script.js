@@ -1,4 +1,5 @@
-import { speciesColors, createSpeciesColorHelper } from './js/colors.js';
+import { createSpeciesColorHelper } from './js/colors.js';
+import { loadTreeCrownGeoJSON, summariseTreeDataset } from './js/data-loader.js';
 import { loadPredictionData } from './js/predictions.js';
 
 console.log('=== SCRIPT LOADED ===');
@@ -14,16 +15,354 @@ let predictionData = []; // Store prediction data from CSV
 let isPredictionMode = false; // Toggle between species view and prediction view
 let lastFocusedElement = null;
 let groupToSpeciesMapping = {}; // Store the mapping of group to species name
+let predictionSummary = null; // Cache computed confusion matrix and metrics
+let predictionMetrics = null; // Metrics loaded from the predictions CSV
+let predictionIndex = new Map();
+let treeLayerIndex = new Map();
+let currentSearchTerm = '';
+let selectedTreeId = null;
 
 const FOCUSABLE_SELECTOR = 'a[href], button:not([disabled]), textarea, input:not([disabled]):not([type="hidden"]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 const focusTrapRegistry = new WeakMap();
 
 const colorHelper = createSpeciesColorHelper();
 
+const PROPERTY_LABEL_OVERRIDES = {
+    tree_id: 'Tree ID',
+    Cmmn_Nm: 'Common Name',
+    cmmn_nm: 'Common Name',
+    Scntf_N: 'Scientific Name',
+    scntf_n: 'Scientific Name',
+    Scntfc_N: 'Scientific Name (Alt)',
+    Family: 'Family',
+    Order: 'Order',
+    Class: 'Class',
+    specs_d: 'Crown Diameter (m)',
+    specis_d: 'Crown Diameter (m)',
+    group_d: 'Group',
+    group_id: 'Group',
+    area: 'Area',
+    perimtr: 'Perimeter',
+    x: 'Projected X',
+    y: 'Projected Y',
+    Drctn_N: 'Direction',
+    Adjst_N: 'Adjusted Bearing',
+    predicted_species: 'Predicted Species',
+    ground_truth_species: 'Ground Truth Species',
+    status: 'Status',
+};
+
+const PROPERTY_DISPLAY_ORDER = [
+    'tree_id',
+    'Cmmn_Nm',
+    'Scntf_N',
+    'Scntfc_N',
+    'Family',
+    'Order',
+    'Class',
+    'group_d',
+    'group_id',
+    'specs_d',
+    'specis_d',
+    'area',
+    'perimtr',
+    'x',
+    'y',
+    'predicted_species',
+    'ground_truth_species',
+    'status',
+];
+
+const PROPERTY_VALUE_TRANSFORMS = {
+    specs_d: (value) => formatMeasurement(value, 'm', { maximumFractionDigits: 2 }),
+    specis_d: (value) => formatMeasurement(value, 'm', { maximumFractionDigits: 2 }),
+    area: (value) => formatArea(value),
+    perimtr: (value) => formatMeasurement(value, 'm', { maximumFractionDigits: 2 }),
+    group_d: (value) => formatGroupLabel(value),
+    group_id: (value) => formatGroupLabel(value),
+    x: (value) => formatNumber(value, 3),
+    y: (value) => formatNumber(value, 3),
+};
+
+const IGNORED_PROPERTY_KEYS = new Set(['__proto__']);
+const PLACEHOLDER_STRINGS = new Set(['', 'null', 'undefined', 'nan', 'n/a', 'na', 'none', 'not available']);
+const HTML_ESCAPE_MAP = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    '\'': '&#39;',
+};
+
+function escapeHtml(value) {
+    if (value === null || value === undefined) {
+        return '';
+    }
+
+    return value.toString().replace(/[&<>"']/g, (char) => HTML_ESCAPE_MAP[char]);
+}
+
+function formatNumber(value, fractionDigits = 2) {
+    const numeric = typeof value === 'number' ? value : Number(value);
+    if (!Number.isFinite(numeric)) {
+        return null;
+    }
+
+    return numeric.toLocaleString(undefined, {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: fractionDigits,
+    });
+}
+
+function formatMeasurement(rawValue, unit = '', options = {}) {
+    const numeric = typeof rawValue === 'number' ? rawValue : Number(rawValue);
+    if (!Number.isFinite(numeric)) {
+        return null;
+    }
+
+    const resolvedOptions = {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: Math.abs(numeric) < 10 ? 2 : 1,
+        ...options,
+    };
+
+    const formattedNumber = numeric.toLocaleString(undefined, resolvedOptions);
+    return unit ? `${formattedNumber} ${unit}`.trim() : formattedNumber;
+}
+
+function formatPercent(rawValue, fractionDigits = 2) {
+    const numeric = typeof rawValue === 'number' ? rawValue : Number(rawValue);
+    if (!Number.isFinite(numeric)) {
+        return '—';
+    }
+
+    return `${(numeric * 100).toFixed(fractionDigits)}%`;
+}
+
+function formatArea(value) {
+    const numeric = typeof value === 'number' ? value : Number(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) {
+        return null;
+    }
+
+    if (numeric >= 10000) {
+        const hectares = numeric / 10000;
+        return `${hectares.toLocaleString(undefined, {
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 4,
+        })} ha`;
+    }
+
+    return `${numeric.toLocaleString(undefined, {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 2,
+    })} m²`;
+}
+
+function normalisePropertyValue(value) {
+    if (value === null || value === undefined) {
+        return null;
+    }
+
+    if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (!trimmed) {
+            return null;
+        }
+
+        if (PLACEHOLDER_STRINGS.has(trimmed.toLowerCase())) {
+            return null;
+        }
+
+        return trimmed;
+    }
+
+    if (typeof value === 'number') {
+        if (!Number.isFinite(value)) {
+            return null;
+        }
+
+        return value;
+    }
+
+    if (typeof value === 'boolean') {
+        return value;
+    }
+
+    if (Array.isArray(value)) {
+        const cleaned = value
+            .map((item) => normalisePropertyValue(item))
+            .filter((item) => item !== null);
+
+        if (cleaned.length === 0) {
+            return null;
+        }
+
+        return cleaned.map((item) => (typeof item === 'string' ? item : item.toString())).join(', ');
+    }
+
+    return null;
+}
+
+function formatPropertyLabel(key) {
+    if (!key) {
+        return '';
+    }
+
+    if (PROPERTY_LABEL_OVERRIDES[key]) {
+        return PROPERTY_LABEL_OVERRIDES[key];
+    }
+
+    const withSpaces = key
+        .replace(/_/g, ' ')
+        .replace(/([a-z])([A-Z])/g, '$1 $2');
+
+    return withSpaces
+        .split(' ')
+        .map((segment) =>
+            segment ? segment.charAt(0).toUpperCase() + segment.slice(1).toLowerCase() : segment,
+        )
+        .join(' ')
+        .trim();
+}
+
+function formatGroupLabel(groupValue) {
+    const normalized = normalisePropertyValue(groupValue);
+    if (normalized === null) {
+        return null;
+    }
+
+    const groupString = normalized.toString();
+    const plainKey = groupString.replace(/^0+/, '') || '0';
+    const speciesName = groupToSpeciesMapping[plainKey] || groupToSpeciesMapping[groupString];
+
+    if (speciesName) {
+        return `Group ${plainKey} · ${speciesName}`;
+    }
+
+    if (/^-?\d+(\.\d+)?$/.test(groupString)) {
+        const numeric = Number(groupString);
+        if (numeric === 0) {
+            return 'Group 0 · Unassigned';
+        }
+
+        return Number.isInteger(numeric) ? `Group ${numeric}` : `Group ${numeric.toFixed(2)}`;
+    }
+
+    return groupString;
+}
+
+function formatPropertyValue(key, value) {
+    const normalized = normalisePropertyValue(value);
+    if (normalized === null) {
+        return null;
+    }
+
+    if (PROPERTY_VALUE_TRANSFORMS[key]) {
+        const transformed = PROPERTY_VALUE_TRANSFORMS[key](normalized);
+        return transformed ?? null;
+    }
+
+    if (typeof normalized === 'number') {
+        const formatted = formatNumber(normalized);
+        return formatted ?? normalized.toString();
+    }
+
+    if (typeof normalized === 'boolean') {
+        return normalized ? 'Yes' : 'No';
+    }
+
+    return normalized.toString();
+}
+
+function buildPropertyDetails(props = {}) {
+    const entries = Object.entries(props)
+        .filter(([key]) => !IGNORED_PROPERTY_KEYS.has(key))
+        .map(([key, value]) => {
+            const formattedValue = formatPropertyValue(key, value);
+            if (formattedValue === null || formattedValue === '') {
+                return null;
+            }
+
+            return {
+                key,
+                label: formatPropertyLabel(key),
+                value: formattedValue,
+            };
+        })
+        .filter(Boolean);
+
+    if (entries.length === 0) {
+        return { html: '', count: 0 };
+    }
+
+    entries.sort((a, b) => {
+        const orderA = PROPERTY_DISPLAY_ORDER.indexOf(a.key);
+        const orderB = PROPERTY_DISPLAY_ORDER.indexOf(b.key);
+
+        if (orderA === -1 && orderB === -1) {
+            return a.label.localeCompare(b.label);
+        }
+
+        if (orderA === -1) {
+            return 1;
+        }
+
+        if (orderB === -1) {
+            return -1;
+        }
+
+        if (orderA === orderB) {
+            return a.label.localeCompare(b.label);
+        }
+
+        return orderA - orderB;
+    });
+
+    const html = entries
+        .map(
+            ({ label, value }) =>
+                `<div class="popup-field"><strong>${escapeHtml(label)}:</strong> ${escapeHtml(value)}</div>`,
+        )
+        .join('');
+
+    return { html, count: entries.length };
+}
+
+function coalesceProperty(props, keys = []) {
+    if (!props) {
+        return null;
+    }
+
+    for (const key of keys) {
+        if (!Object.prototype.hasOwnProperty.call(props, key)) {
+            continue;
+        }
+
+        const value = props[key];
+        if (value === null || value === undefined) {
+            continue;
+        }
+
+        if (typeof value === 'string' && PLACEHOLDER_STRINGS.has(value.trim().toLowerCase())) {
+            continue;
+        }
+
+        if (Array.isArray(value) && value.length === 0) {
+            continue;
+        }
+
+        return value;
+    }
+
+    return null;
+}
+
 function getSpeciesColor(species, treeId) {
     return colorHelper.getColor(species, treeId, {
         isPredictionMode,
         predictionData,
+        predictionIndex,
     });
 }
 
@@ -102,6 +441,247 @@ function releaseFocusTrap(container) {
     focusTrapRegistry.delete(container);
 }
 
+function getPredictionForTree(treeId) {
+    if (!treeId) {
+        return undefined;
+    }
+    return predictionIndex.get(treeId.toString());
+}
+
+function rebuildPredictionIndex() {
+    predictionIndex = new Map();
+
+    predictionData.forEach((record) => {
+        const key = record.treeId?.toString();
+        if (!key) {
+            return;
+        }
+
+        if (!predictionIndex.has(key)) {
+            predictionIndex.set(key, record);
+            return;
+        }
+
+        const current = predictionIndex.get(key);
+        if (current?.isTraining && !record.isTraining) {
+            predictionIndex.set(key, record);
+        }
+    });
+}
+
+function getActiveFilters() {
+    const hideUnknown = document.getElementById('filterUnknownSpecies')?.checked ?? false;
+    const showCorrect = document.getElementById('filterCorrect')?.checked ?? true;
+    const showIncorrect = document.getElementById('filterIncorrect')?.checked ?? true;
+    const showTraining = document.getElementById('filterTraining')?.checked ?? true;
+
+    return {
+        hideUnknown,
+        showCorrect,
+        showIncorrect,
+        showTraining,
+    };
+}
+
+function recomputeFilteredData() {
+    let data = [...originalTreeData];
+    const filters = getActiveFilters();
+    const searchTerm = currentSearchTerm.trim().toLowerCase();
+
+    if (isPredictionMode) {
+        data = data.filter((tree) => {
+            const treeId = tree.properties?.tree_id;
+            const prediction = getPredictionForTree(treeId);
+            if (!prediction) {
+                return false;
+            }
+
+            if (prediction.isTraining) {
+                return filters.showTraining;
+            }
+
+            if (prediction.correct) {
+                return filters.showCorrect;
+            }
+
+            return filters.showIncorrect;
+        });
+    } else if (filters.hideUnknown) {
+        data = data.filter((tree) => {
+            const props = tree.properties || {};
+            const commonName = props.Cmmn_Nm || props.cmmn_nm || props.species || props.Species;
+            return Boolean(commonName);
+        });
+    }
+
+    if (searchTerm) {
+        data = data.filter((tree) => {
+            const props = tree.properties || {};
+            const treeId = (props.tree_id || '').toString().toLowerCase();
+            const commonName = (props.Cmmn_Nm || props.cmmn_nm || '').toString().toLowerCase();
+            const scientificName = (props.Scntf_N || props.scntf_n || '').toString().toLowerCase();
+
+            if (treeId.includes(searchTerm) || commonName.includes(searchTerm) || scientificName.includes(searchTerm)) {
+                return true;
+            }
+
+            if (isPredictionMode) {
+                const prediction = getPredictionForTree(props.tree_id);
+                if (prediction) {
+                    return (
+                        prediction.actual?.toLowerCase().includes(searchTerm) ||
+                        prediction.predicted?.toLowerCase().includes(searchTerm)
+                    );
+                }
+            }
+
+            return false;
+        });
+    }
+
+    return data;
+}
+
+function applyCurrentSort(data) {
+    if (!currentSortColumn) {
+        return [...data];
+    }
+
+    const normalise = (value) => {
+        if (value === null || value === undefined) {
+            return '';
+        }
+
+        if (typeof value === 'number') {
+            return value;
+        }
+
+        if (typeof value === 'string') {
+            const trimmed = value.trim();
+            const numeric = Number(trimmed);
+            if (!Number.isNaN(numeric) && trimmed !== '') {
+                return numeric;
+            }
+            return trimmed.toLowerCase();
+        }
+
+        const numeric = Number(value);
+        if (!Number.isNaN(numeric)) {
+            return numeric;
+        }
+
+        return value.toString().toLowerCase();
+    };
+
+    const getSortValue = (tree) => {
+        const props = tree.properties || {};
+
+        if (currentSortColumn === 'tree_id') {
+            const treeId = props.tree_id;
+            const numeric = Number(treeId);
+            return Number.isNaN(numeric) ? treeId : numeric;
+        }
+
+        if (isPredictionMode) {
+            const prediction = getPredictionForTree(props.tree_id);
+            switch (currentSortColumn) {
+                case 'actual':
+                    return prediction?.actual ?? '';
+                case 'predicted':
+                    return prediction?.predicted ?? '';
+                case 'status':
+                    if (!prediction) {
+                        return 3;
+                    }
+                    if (prediction.isTraining) {
+                        return 0;
+                    }
+                    return prediction.correct ? 1 : 2;
+                default:
+                    break;
+            }
+        }
+
+        return props[currentSortColumn];
+    };
+
+    const sorted = [...data].sort((a, b) => {
+        const aValue = normalise(getSortValue(a));
+        const bValue = normalise(getSortValue(b));
+
+        if (typeof aValue === 'number' && typeof bValue === 'number') {
+            return aValue - bValue;
+        }
+
+        if (aValue < bValue) {
+            return -1;
+        }
+        if (aValue > bValue) {
+            return 1;
+        }
+        return 0;
+    });
+
+    if (currentSortDirection === 'desc') {
+        sorted.reverse();
+    }
+
+    return sorted;
+}
+
+function highlightSelectedRow() {
+    const rows = document.querySelectorAll('#tableBody tr');
+    rows.forEach((row) => {
+        const isSelected = row.dataset.treeId === selectedTreeId;
+        row.classList.toggle('selected', isSelected);
+        if (isSelected) {
+            row.scrollIntoView({ block: 'nearest' });
+        }
+    });
+}
+
+function bindSortHeaderEvents() {
+    document.querySelectorAll('#resultsTable th[data-sort]').forEach((header) => {
+        header.addEventListener('click', () => sortTable(header.dataset.sort));
+    });
+}
+
+function focusTreeOnMap(treeId, { openPopup = true, fitBounds = true } = {}) {
+    if (!treeId) {
+        return;
+    }
+
+    const layer = treeLayerIndex.get(treeId.toString());
+    if (!layer) {
+        return;
+    }
+
+    if (fitBounds && typeof layer.getBounds === 'function') {
+        map.fitBounds(layer.getBounds().pad(0.1));
+    }
+
+    if (openPopup && typeof layer.openPopup === 'function') {
+        layer.openPopup();
+    }
+}
+
+function refreshDataViews({ preserveSelection = false } = {}) {
+    const nextData = recomputeFilteredData();
+
+    if (!preserveSelection || !nextData.some((tree) => tree.properties?.tree_id?.toString() === selectedTreeId)) {
+        selectedTreeId = null;
+    }
+
+    filteredData = applyCurrentSort(nextData);
+    addTreesToMap(filteredData);
+    populateResultsTable();
+    updateDataStatus(`Showing ${filteredData.length} of ${originalTreeData.length} trees`);
+
+    if (selectedTreeId) {
+        highlightSelectedRow();
+    }
+}
+
 // Toggle between normal view and prediction view
 function togglePredictionMode(forceState) {
     const toggleButton = document.getElementById('predictionModeToggle');
@@ -114,6 +694,9 @@ function togglePredictionMode(forceState) {
     } else {
         isPredictionMode = toggleButton.getAttribute('aria-checked') === 'true';
     }
+
+    currentSortColumn = null;
+    currentSortDirection = 'asc';
 
     toggleButton.setAttribute('aria-checked', String(isPredictionMode));
     toggleButton.setAttribute('aria-label', isPredictionMode ? 'Switch to species display mode' : 'Switch to prediction display mode');
@@ -150,8 +733,7 @@ function togglePredictionMode(forceState) {
         alert('No prediction data available. Please check that the prediction_results.csv file is present.');
     }
 
-    addTreesToMap();
-    populateResultsTable();
+    refreshDataViews({ preserveSelection: true });
     updateLegendForPredictionMode();
 }
 
@@ -172,11 +754,22 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     initializeMap();
     setupEventListeners();
+    updateModelPerformance();
     await loadData();
     
     // Load prediction data AFTER shapefile data is loaded, passing the tree data for species mapping
-    predictionData = await loadPredictionData('/raw_data/prediction_results_top5.csv', originalTreeData);
+    const predictionLoad = await loadPredictionData('/raw_data/prediction_results_top5_metrics.csv', originalTreeData);
+    predictionData = predictionLoad.records || [];
+    predictionMetrics = predictionLoad.metrics || {};
+    rebuildPredictionIndex();
+    updateModelPerformance();
+    if (isPredictionMode) {
+        refreshDataViews({ preserveSelection: true });
+    }
     console.log(`Loaded ${predictionData.length} prediction records`);
+    if (predictionMetrics && Object.keys(predictionMetrics).length > 0) {
+        console.log('Loaded prediction metrics:', predictionMetrics);
+    }
     
     // Create a summary of which species each group represents and store it globally
     if (predictionData.length > 0) {
@@ -191,6 +784,10 @@ document.addEventListener('DOMContentLoaded', async function() {
         // Update the modal with actual species information
         updateGroupInfoModal();
     }
+
+    predictionSummary = computePredictionSummary(predictionData);
+    renderConfusionMatrix();
+    renderPerClassMetrics();
     
     // Log the first few prediction records for debugging
     if (predictionData.length > 0) {
@@ -670,7 +1267,7 @@ function setupEventListeners() {
             // Add event listener for filter change
             checkbox.addEventListener('change', () => {
                 if (isPredictionMode) {
-                    addTreesToMap();
+                    refreshDataViews({ preserveSelection: true });
                 }
             });
         }
@@ -690,8 +1287,7 @@ function setupEventListeners() {
             
             // Add event listener for the new filter
             document.getElementById('filterUnknownSpecies').addEventListener('change', () => {
-                populateResultsTable();
-                addTreesToMap();
+                refreshDataViews({ preserveSelection: true });
             });
         }
         
@@ -716,10 +1312,6 @@ function setupEventListeners() {
 
     document.getElementById('searchInput').addEventListener('input', (e) => {
         filterTableData(e.target.value);
-    });
-
-    document.querySelectorAll('#resultsTable th[data-sort]').forEach(header => {
-        header.addEventListener('click', () => sortTable(header.dataset.sort));
     });
 
     document.getElementById('loadLocalShapefileBtn').addEventListener('click', () => {
@@ -787,165 +1379,61 @@ function setupEventListeners() {
  * Calculate and update summary statistics about the tree data
  */
 function updateTreeStatistics() {
-    if (!originalTreeData || originalTreeData.length === 0) return;
-    
-    // Count trees by species
-    const speciesCounts = {};
-    let totalArea = 0;
-    
-    originalTreeData.forEach(tree => {
-        const props = tree.properties;
-        const species = props.Cmmn_Nm || props.cmmn_nm || props.species || props.SPECIES || props.Species || props.ground_truth_species || 'Unknown';
-        
-        // Count by species
-        speciesCounts[species] = (speciesCounts[species] || 0) + 1;
-        
-        // Calculate area if we have geometry
-        if (tree.geometry && tree.geometry.type.includes('Polygon')) {
-            try {
-                // This is a rough approximation using the geometry directly
-                // In a real app, we'd use a proper area calculation library for more accuracy
-                const layer = L.geoJSON(tree);
-                const area = L.GeometryUtil.geodesicArea(layer.getLayers()[0].getLatLngs()[0]);
-                totalArea += area;
-            } catch (e) {
-                console.warn('Error calculating area:', e);
-            }
-        }
-    });
-    
-    // Format total area
-    let areaText = '';
-    if (totalArea < 10000) {
-        areaText = `${totalArea.toFixed(2)} m²`;
-    } else {
-        areaText = `${(totalArea / 10000).toFixed(4)} ha`;
+    const totalTreesEl = document.getElementById('datasetTotalTrees');
+    const speciesEl = document.getElementById('datasetSpeciesTypes');
+    const areaEl = document.getElementById('datasetTotalArea');
+    const crownEl = document.getElementById('datasetAvgCrown');
+
+    if (!totalTreesEl || !speciesEl || !areaEl || !crownEl) {
+        return;
     }
-    
-    // Update the performance section with our statistics
-    document.getElementById('accuracy').textContent = originalTreeData.length;
-    document.getElementById('precision').textContent = Object.keys(speciesCounts).length;
-    document.getElementById('recall').textContent = areaText;
-    document.getElementById('f1score').textContent = '-';
-    
-    // Update the labels
-    document.querySelectorAll('.metrics-grid .metric-label')[0].textContent = 'Total Trees';
-    document.querySelectorAll('.metrics-grid .metric-label')[1].textContent = 'Species Types';
-    document.querySelectorAll('.metrics-grid .metric-label')[2].textContent = 'Total Area';
-    document.querySelectorAll('.metrics-grid .metric-label')[3].textContent = 'Avg. Height';
-    
-    // Update the header
-    document.querySelector('.performance-section h3').textContent = 'Tree Data Statistics';
+
+    if (!originalTreeData || originalTreeData.length === 0) {
+        totalTreesEl.textContent = '—';
+        speciesEl.textContent = '—';
+        areaEl.textContent = '—';
+        crownEl.textContent = '—';
+        return;
+    }
+
+    const { speciesCounts, totalArea } = summariseTreeDataset(originalTreeData);
+    const totalTrees = originalTreeData.length;
+    const uniqueSpecies = Object.keys(speciesCounts).length;
+
+    const crownValues = originalTreeData
+        .map((feature) => {
+            const props = feature?.properties || {};
+            const raw = coalesceProperty(props, ['specs_d', 'specis_d', 'crown_width', 'width', 'WIDTH']);
+            const numeric = Number(raw);
+            return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+        })
+        .filter((value) => value !== null);
+
+    const averageCrown = crownValues.length
+        ? crownValues.reduce((sum, value) => sum + value, 0) / crownValues.length
+        : null;
+
+    totalTreesEl.textContent = totalTrees.toLocaleString();
+    speciesEl.textContent = uniqueSpecies.toLocaleString();
+    areaEl.textContent = formatArea(totalArea) || '—';
+    crownEl.textContent = averageCrown
+        ? formatMeasurement(averageCrown, 'm', { maximumFractionDigits: 2 })
+        : '—';
 }
 
 async function loadAndProcessShapefiles() {
     try {
-        // Check both possible paths for the shapefile
-        let shpPath = '/raw_data/shapefiles/mcws_crowns_newclass.shp';
-        let dbfPath = '/raw_data/shapefiles/mcws_crowns_newclass.dbf';
-        let prjPath = '/raw_data/shapefiles/mcws_crowns_newclass.prj';
-        
-        // Try to check if the primary shapefile exists
-        try {
-            const testResponse = await fetch(shpPath, { method: 'HEAD' });
-            if (!testResponse.ok) {
-                console.warn(`Main shapefile not found at ${shpPath}. Trying fallback location...`);
-                // Fall back to crown_shp folder
-                shpPath = '/raw_data/crown_shp/mcws_crowns.shp';
-                dbfPath = '/raw_data/crown_shp/mcws_crowns.dbf';
-                prjPath = '/raw_data/crown_shp/mcws_crowns.prj';
-                
-                // Test if this fallback exists
-                const altResponse = await fetch(shpPath, { method: 'HEAD' });
-                if (!altResponse.ok) {
-                    throw new Error('Shapefile not found in either location');
-                }
-                console.log(`Using fallback shapefile from ${shpPath}`);
-            } else {
-                console.log(`Using primary shapefile from ${shpPath}`);
-            }
-        } catch (fetchError) {
-            console.error('Error checking shapefile availability:', fetchError);
-            throw new Error('Failed to access shapefile resources');
-        }
-        
-        console.log(`Loading shapefiles from server: ${shpPath} and ${dbfPath}`);
-        
-        if (typeof shapefile === 'undefined') {
-            console.error('Shapefile library not available. Check if shapefile.js is loaded.');
-            throw new Error('Shapefile library not available');
-        }
-        
-        // Try to load the PRJ file to understand the projection
-        try {
-            const prjResponse = await fetch(prjPath);
-            if (prjResponse.ok) {
-                const prjText = await prjResponse.text();
-                console.log('PRJ file content:', prjText);
-            }
-        } catch (prjError) {
-            console.warn('Could not load PRJ file:', prjError);
-            // Continue anyway
-        }
-        
-        // Set encoding options for shapefile reading (ISO-8859-1)
-        const options = {
-            encoding: 'ISO-8859-1'
-        };
-        
-        // Load the shapefile with the specified encoding
-        const geojson = await shapefile.read(shpPath, dbfPath, options);
+        const { geojson, metadata } = await loadTreeCrownGeoJSON();
 
-        if (!geojson || !geojson.features || geojson.features.length === 0) {
-            throw new Error("Shapefile loaded but contains no features.");
-        }
-        console.log(`Shapefile loaded with ${geojson.features.length} features.`);
-        
-        // Analyze the geometry types for debugging
-        const geometryTypes = {};
-        for (const feature of geojson.features) {
-            if (feature.geometry && feature.geometry.type) {
-                geometryTypes[feature.geometry.type] = (geometryTypes[feature.geometry.type] || 0) + 1;
-            }
-        }
-        console.log('Geometry types in shapefile:', geometryTypes);
-        
-        // Log the first feature to inspect its structure
-        console.log("First feature:", JSON.stringify(geojson.features[0]).substring(0, 500) + "...");
-        
-        // Function to transform coordinates from EPSG:3123 to WGS84 (EPSG:4326)
-        function transformCoordinates(coordinates, type) {
-            if (type === 'Point') {
-                return proj4('EPSG:3123', 'EPSG:4326', coordinates);
-            } else if (type === 'LineString' || type === 'MultiPoint') {
-                return coordinates.map(point => proj4('EPSG:3123', 'EPSG:4326', point));
-            } else if (type === 'Polygon' || type === 'MultiLineString') {
-                return coordinates.map(ring => 
-                    ring.map(point => proj4('EPSG:3123', 'EPSG:4326', point))
-                );
-            } else if (type === 'MultiPolygon') {
-                return coordinates.map(polygon => 
-                    polygon.map(ring => 
-                        ring.map(point => proj4('EPSG:3123', 'EPSG:4326', point))
-                    )
-                );
-            }
-            return coordinates; // Return unchanged if type is unknown
+        if (metadata.prjText) {
+            console.log('PRJ file content:', metadata.prjText);
         }
 
-        // Transform all features
-        console.log("Transforming coordinates from EPSG:3123 to WGS84...");
-        for (const feature of geojson.features) {
-            if (feature.geometry && feature.geometry.type) {
-                feature.geometry.coordinates = transformCoordinates(
-                    feature.geometry.coordinates, 
-                    feature.geometry.type
-                );
-            }
-        }
-        console.log("Coordinate transformation complete");
+        console.log(
+            `Shapefile loaded (${metadata.sourceId}) with ${geojson.features.length} features from ${metadata.sourcePaths.shp}.`,
+        );
+        console.log('Geometry types in shapefile:', metadata.geometryTypes);
 
-        // SIMPLIFICATION: Process features but assign a simple, consistent status.
         originalTreeData = geojson.features.map((feature, index) => {
             const properties = feature.properties;
             const treeId = properties.tree_id || properties.id || properties.FID || `T${(index + 1).toString().padStart(3, '0')}`;
@@ -963,13 +1451,8 @@ async function loadAndProcessShapefiles() {
             };
         });
 
-        // Show all data by default.
-        filteredData = [...originalTreeData];
-
-        addTreesToMap();
-        populateResultsTable();
+    refreshDataViews();
         updateTreeStatistics(); // Added statistics update
-        createSpeciesLegend(); // Create the species legend
         hideLoadingIndicator();
         updateShapefileStatus('✅', `Trees: ${originalTreeData.length}`);
         
@@ -985,64 +1468,16 @@ async function loadAndProcessShapefiles() {
 /**
  * Add tree polygons to the Leaflet map using L.Proj.geoJson for automatic reprojection.
  */
-function addTreesToMap() {
+function addTreesToMap(data = filteredData) {
     treeLayers.clearLayers();
+    treeLayerIndex.clear();
 
-    if (filteredData.length === 0) {
-        console.warn("addTreesToMap called with no data to display.");
+    if (!data || data.length === 0) {
+        createSpeciesLegend();
         return;
     }
-    
-    // Apply filters for unknown species
-    const hideUnknown = document.getElementById('filterUnknownSpecies')?.checked;
-    let dataToMap = filteredData;
-    
-    if (hideUnknown) {
-        dataToMap = filteredData.filter(tree => {
-            const props = tree.properties;
-            const commonName = props.Cmmn_Nm || props.cmmn_nm;
-            return commonName; // Only keep trees that have a common name
-        });
-    }
 
-    // Filter by prediction status if we're in prediction mode
-    if (isPredictionMode) {
-        // Get all data types to show based on filter checkboxes
-        const showCorrect = document.getElementById('filterCorrect').checked;
-        const showIncorrect = document.getElementById('filterIncorrect').checked;
-        const showTraining = document.getElementById('filterTraining').checked;
-        
-        // Only show trees that have predictions and match our filter settings
-        const beforeCount = dataToMap.length;
-        dataToMap = dataToMap.filter(tree => {
-            const treeId = tree.properties.tree_id.toString();
-            const treeData = predictionData.find(p => p.treeId === treeId);
-            
-            if (!treeData) return false; // No data for this tree
-            
-            if (treeData.isTraining) {
-                return showTraining; // Include if training filter is on
-            } else if (treeData.correct) {
-                return showCorrect; // Include if correct predictions filter is on
-            } else {
-                return showIncorrect; // Include if incorrect predictions filter is on
-            }
-        });
-        
-        console.log(`Filtered from ${beforeCount} to ${dataToMap.length} trees with predictions/training data`);
-        
-        if (dataToMap.length > 0) {
-            // Log a sample of tree IDs that were kept
-            console.log("Sample of kept tree IDs:", dataToMap.slice(0, 3).map(t => t.properties.tree_id));
-        } else {
-            console.warn("No trees match the current filters");
-        }
-    }
-
-    console.log("Adding", dataToMap.length, "tree features to map");
-    
-    // Use standard GeoJSON handling with species-based styling
-    const geoJsonLayer = L.geoJSON(dataToMap, {
+    const geoJsonLayer = L.geoJSON(data, {
         style: function(feature) {
             // Get species from properties - prioritize Cmmn_Nm (Common Name) field
             const species = feature.properties.Cmmn_Nm || 
@@ -1085,124 +1520,164 @@ function addTreesToMap() {
         },
         onEachFeature: (feature, layer) => {
             const props = feature.properties;
-            
-            // Calculate area if it's a polygon
-            let area = 0;
-            if (feature.geometry && feature.geometry.type.includes('Polygon')) {
+            const rawTreeId = props.tree_id ?? props.id ?? props.FID ?? null;
+            const treeId = rawTreeId != null ? rawTreeId.toString() : null;
+            if (treeId) {
+                treeLayerIndex.set(treeId, layer);
+            }
+
+            let areaSqMeters = null;
+            if (feature.geometry && typeof feature.geometry.type === 'string' && feature.geometry.type.includes('Polygon')) {
                 try {
-                    // Calculate approximate area (rough estimate)
-                    area = L.GeometryUtil.geodesicArea(layer.getLatLngs()[0]);
-                    // Convert to square meters if very small
-                    if (area < 100) {
-                        area = (area).toFixed(2) + ' m²';
-                    } else {
-                        // Convert to hectares for larger areas
-                        area = (area / 10000).toFixed(4) + ' ha';
+                    const latLngs = layer.getLatLngs();
+                    if (Array.isArray(latLngs) && latLngs.length > 0) {
+                        const rings = Array.isArray(latLngs[0]) ? latLngs : [latLngs];
+                        const computedArea = rings.reduce((sum, ring) => {
+                            if (!Array.isArray(ring) || ring.length === 0) {
+                                return sum;
+                            }
+
+                            return sum + L.GeometryUtil.geodesicArea(ring);
+                        }, 0);
+
+                        if (Number.isFinite(computedArea) && computedArea > 0) {
+                            areaSqMeters = computedArea;
+                        }
                     }
-                } catch (e) {
-                    console.warn('Error calculating area:', e);
-                    area = 'Not available';
+                } catch (error) {
+                    console.warn('Error calculating area:', error);
                 }
             }
-            
-            // Get species information - prioritize the Cmmn_Nm (Common Name) field
-            const species = props.Cmmn_Nm || props.cmmn_nm || props.species || props.SPECIES || props.Species || props.ground_truth_species || 'Unknown';
-            
-            // Create a styled popup with key information at the top
-            let popupContent = `
-                <div style="min-width: 300px;">
-                    <div style="background-color: ${getSpeciesColor(species, props.tree_id)}; color: white; padding: 10px; margin: -13px -19px 10px -19px; border-radius: 12px 12px 0 0;">
-                        <h4 style="margin: 0; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);">Tree ${props.tree_id || 'ID Unknown'}</h4>
-                        <div style="font-size: 14px; margin-top: 5px;">${species}</div>
-                    </div>
-                    
-                    <div style="margin-bottom: 15px;">
-                        <strong>Area:</strong> ${area}<br>
-                        <strong>Height:</strong> ${props.height || props.HEIGHT || 'Not available'} ${props.height_unit || 'm'}<br>
-                        <strong>Crown Width:</strong> ${props.crown_width || props.width || props.WIDTH || 'Not available'} ${props.width_unit || 'm'}
-                    </div>
-                    
-                    <details>
-                        <summary style="cursor: pointer; margin-bottom: 8px; color: #007bff;">Show All Properties</summary>
-                        <div style="max-height: 200px; overflow-y: auto; font-size: 12px; border: 1px solid #eee; padding: 8px; border-radius: 4px;">`;
-                        
-            // Add all properties in the detailed section
-            for (let prop in props) {
-                popupContent += `<strong>${prop}:</strong> ${props[prop]}<br>`;
+
+            if (!Number.isFinite(areaSqMeters)) {
+                const areaPropValue = coalesceProperty(props, ['area']);
+                const areaNumeric = Number(areaPropValue);
+                if (Number.isFinite(areaNumeric) && areaNumeric > 0) {
+                    areaSqMeters = areaNumeric;
+                }
             }
-            
-            popupContent += `
+
+            const species =
+                props.Cmmn_Nm ||
+                props.cmmn_nm ||
+                props.species ||
+                props.SPECIES ||
+                props.Species ||
+                props.ground_truth_species ||
+                'Unknown';
+
+            const speciesDisplay = escapeHtml(species);
+            const treeIdDisplay = escapeHtml(treeId ?? 'ID Unknown');
+
+            const areaDisplay = formatArea(areaSqMeters);
+            const crownDiameterRaw = coalesceProperty(props, ['specs_d', 'specis_d', 'crown_width', 'width', 'WIDTH']);
+            const crownDiameterDisplay = formatMeasurement(
+                crownDiameterRaw,
+                props.width_unit || props.crown_width_unit || props.diameter_unit || 'm',
+                { maximumFractionDigits: 2 },
+            );
+            const perimeterDisplay = formatMeasurement(
+                coalesceProperty(props, ['perimtr', 'perimeter', 'perim']),
+                'm',
+                { maximumFractionDigits: 2 },
+            );
+            const groupDisplay = formatGroupLabel(coalesceProperty(props, ['group_d', 'group_id']));
+
+            const quickFacts = [
+                { label: 'Group', value: groupDisplay },
+                { label: 'Area', value: areaDisplay },
+                { label: 'Perimeter', value: perimeterDisplay },
+                { label: 'Crown Diameter', value: crownDiameterDisplay },
+            ].filter((fact) => fact.value);
+
+            const quickFactsBlock = quickFacts.length
+                ? `<div style="margin-bottom: 15px;">${quickFacts
+                      .map(
+                          (fact) =>
+                              `<div><strong>${escapeHtml(fact.label)}:</strong> ${escapeHtml(fact.value)}</div>`,
+                      )
+                      .join('')}</div>`
+                : '';
+
+            const propertyDetails = buildPropertyDetails(props);
+            const propertiesBlock =
+                propertyDetails.count > 0
+                    ? `<details>
+                            <summary style="cursor: pointer; margin-bottom: 8px; color: #007bff;">Show Tree Attributes</summary>
+                            <div style="max-height: 220px; overflow-y: auto; font-size: 12px; border: 1px solid #eee; padding: 8px; border-radius: 4px;">
+                                ${propertyDetails.html}
+                            </div>
+                        </details>`
+                    : `<p style="font-size: 12px; color: #6b7280; margin: 0;">No additional attributes available.</p>`;
+
+            const predictionRecord = getPredictionForTree(treeId);
+            let predictionBlock = '';
+            if (isPredictionMode && predictionRecord) {
+                if (predictionRecord.isTraining) {
+                    predictionBlock = `
+                        <div style="margin-bottom: 15px; padding: 10px; background-color: #fefce8; border-radius: 4px; border-left: 4px solid #FACC15;">
+                            <h4 style="margin: 0 0 8px 0;">Training Data</h4>
+                            <div><strong>Species:</strong> ${escapeHtml(predictionRecord.actual)}</div>
+                            <div><strong>Status:</strong> <span style="color:#D97706; font-weight:bold;">Used for Training</span></div>
                         </div>
-                    </details>
+                    `;
+                } else {
+                    const statusColor = predictionRecord.correct ? '#22c55e' : '#ef4444';
+                    const statusText = predictionRecord.correct ? '✓ Correct' : '✗ Incorrect';
+                    predictionBlock = `
+                        <div style="margin-bottom: 15px; padding: 10px; background-color: #f5f5f5; border-radius: 4px; border-left: 4px solid ${statusColor};">
+                            <h4 style="margin: 0 0 8px 0;">Prediction Result</h4>
+                            <div><strong>Actual:</strong> ${escapeHtml(predictionRecord.actual)}</div>
+                            <div><strong>Predicted:</strong> ${escapeHtml(predictionRecord.predicted)}</div>
+                            <div><strong>Status:</strong> <span style="color:${statusColor}; font-weight:bold;">${statusText}</span></div>
+                        </div>
+                    `;
+                }
+            }
+
+            const popupBody = [predictionBlock, quickFactsBlock, propertiesBlock].filter(Boolean).join('');
+
+            const popupContent = `
+                <div style="min-width: 320px;">
+                    <div style="background-color: ${getSpeciesColor(species, props.tree_id)}; color: white; padding: 10px; margin: -13px -19px 12px -19px; border-radius: 12px 12px 0 0;">
+                        <h4 style="margin: 0; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);">Tree ${treeIdDisplay}</h4>
+                        <div style="font-size: 14px; margin-top: 5px;">${speciesDisplay}</div>
+                    </div>
+                    ${popupBody}
                 </div>
             `;
-            
-            // Add prediction information to popup if we're in prediction mode
-            if (isPredictionMode) {
-                const treeData = predictionData.find(p => p.treeId === props.tree_id.toString());
-                
-                if (treeData) {
-                    let predictionInfo = '';
-                    
-                    if (treeData.isTraining) {
-                        // Show training data info
-                        predictionInfo = `
-                            <div style="margin-top: 15px; padding: 10px; background-color: #f5f5f5; border-radius: 4px; border-left: 4px solid #FFC107">
-                                <h4 style="margin-top: 0; margin-bottom: 8px;">Training Data</h4>
-                                <strong>Species:</strong> ${treeData.actual}<br>
-                                <strong>Status:</strong> <span style="color:#FFC107; font-weight:bold;">Used for Training</span>
-                            </div>
-                        `;
-                    } else {
-                        // Show prediction result info
-                        const predictionStatus = treeData.correct ? 
-                            '<span style="color:#4CAF50; font-weight:bold;">✓ CORRECT</span>' : 
-                            '<span style="color:#F44336; font-weight:bold;">✗ INCORRECT</span>';
-                        
-                        predictionInfo = `
-                            <div style="margin-top: 15px; padding: 10px; background-color: #f5f5f5; border-radius: 4px; border-left: 4px solid ${treeData.correct ? '#4CAF50' : '#F44336'}">
-                                <h4 style="margin-top: 0; margin-bottom: 8px;">Prediction Result</h4>
-                                <strong>Actual:</strong> ${treeData.actual}<br>
-                                <strong>Predicted:</strong> ${treeData.predicted}<br>
-                                <strong>Status:</strong> ${predictionStatus}
-                            </div>
-                        `;
-                    }
-                    
-                    // Insert the info before the details section
-                    const detailsIndex = popupContent.indexOf('<details>');
-                    if (detailsIndex !== -1) {
-                        popupContent = popupContent.substring(0, detailsIndex) + 
-                            predictionInfo + 
-                            popupContent.substring(detailsIndex);
-                    } else {
-                        popupContent = popupContent.replace('</div>', predictionInfo + '</div>');
-                    }
-                }
-            }
-            
+
             layer.bindPopup(popupContent);
 
-            // Add a tooltip with basic info that appears on hover
-            let tooltipContent = `Tree ${props.tree_id || 'Unknown'}: ${species}`;
-            
-            // Add prediction info to tooltip in prediction mode
-            if (isPredictionMode) {
-                const prediction = predictionData.find(p => p.treeId === props.tree_id.toString());
-                if (prediction) {
-                    tooltipContent = `Tree ${props.tree_id}: ${prediction.actual} → ${prediction.predicted} (${prediction.correct ? 'Correct' : 'Incorrect'})`;
+            const treeIdLabel = treeId ?? 'Unknown';
+            let tooltipContent = `Tree ${treeIdLabel}: ${species}`;
+
+            if (isPredictionMode && predictionRecord) {
+                if (predictionRecord.isTraining) {
+                    tooltipContent = `Tree ${treeIdLabel}: ${predictionRecord.actual || 'Unknown'} (Training)`;
+                } else {
+                    const statusText = predictionRecord.correct ? 'Correct' : 'Incorrect';
+                    const actual = predictionRecord.actual || 'Unknown';
+                    const predicted = predictionRecord.predicted || 'Unknown';
+                    tooltipContent = `Tree ${treeIdLabel}: ${actual} → ${predicted} (${statusText})`;
                 }
             }
-            
+
             layer.bindTooltip(tooltipContent, {
                 direction: 'top',
                 sticky: true,
                 opacity: 0.9,
-                className: 'custom-tooltip'
+                className: 'custom-tooltip',
             });
 
             layer.on('click', () => {
-                map.fitBounds(layer.getBounds().pad(0.1));
+                if (!treeId) {
+                    return;
+                }
+
+                selectedTreeId = treeId;
+                highlightSelectedRow();
+                focusTreeOnMap(treeId, { openPopup: true, fitBounds: false });
             });
         }
     });
@@ -1216,8 +1691,10 @@ function addTreesToMap() {
 
     // Zoom to the bounds of the features on the initial load.
     if (geoJsonLayer.getBounds && geoJsonLayer.getBounds().isValid()) {
-        console.log("Fitting map to tree bounds");
-        map.fitBounds(geoJsonLayer.getBounds().pad(0.1));
+        if (!selectedTreeId) {
+            console.log("Fitting map to tree bounds");
+            map.fitBounds(geoJsonLayer.getBounds().pad(0.1));
+        }
     } else {
         console.warn("Could not fit to bounds - bounds invalid or not available");
     }
@@ -1230,11 +1707,6 @@ function populateResultsTable() {
     const tableBody = document.getElementById('tableBody');
     tableBody.innerHTML = '';
 
-    if (filteredData.length === 0) {
-        tableBody.innerHTML = '<tr><td colspan="5">No trees to display.</td></tr>';
-        return;
-    }
-    
     // Update table headers based on mode
     const tableHeaders = document.querySelector('#resultsTable thead tr');
     
@@ -1243,8 +1715,7 @@ function populateResultsTable() {
             <th data-sort="tree_id">ID</th>
             <th data-sort="actual">Actual Species</th>
             <th data-sort="predicted">Predicted Species</th>
-            <th data-sort="correct">Status</th>
-            <th>Action</th>
+            <th data-sort="status">Status</th>
         `;
         
         // Show the message in console for debugging
@@ -1262,38 +1733,16 @@ function populateResultsTable() {
         console.log("Switched to regular mode headers");
     }
 
-    // Filter trees based on mode
-    let treesToShow = [];
-    
-    if (isPredictionMode) {
-        // In prediction mode, only show trees that have prediction data
-        const predictionTreeIds = new Set(predictionData.map(p => p.treeId));
-        
-        treesToShow = filteredData.filter(tree => 
-            predictionTreeIds.has(tree.properties.tree_id.toString())
-        );
-    } else {
-        // In regular mode, filter out trees with unknown common names if requested
-        treesToShow = filteredData.filter(tree => {
-            const props = tree.properties;
-            const commonName = props.Cmmn_Nm || props.cmmn_nm;
-            
-            // Keep trees that have a common name or all trees if filter is off
-            return commonName || !document.getElementById('filterUnknownSpecies')?.checked;
-        });
-        
-        // Sort by common name by default for first load if not already sorted
-        if (!currentSortColumn) {
-            treesToShow.sort((a, b) => {
-                const nameA = a.properties.Cmmn_Nm || a.properties.cmmn_nm || 'Unknown';
-                const nameB = b.properties.Cmmn_Nm || b.properties.cmmn_nm || 'Unknown';
-                return nameA.localeCompare(nameB);
-            });
-        }
+    bindSortHeaderEvents();
+    updateSortIndicators();
+
+    if (filteredData.length === 0) {
+        tableBody.innerHTML = '<tr><td colspan="5">No trees to display.</td></tr>';
+        return;
     }
 
     // Populate the table based on mode
-    treesToShow.forEach(tree => {
+    filteredData.forEach(tree => {
         const props = tree.properties;
         const treeId = props.tree_id;
         const row = document.createElement('tr');
@@ -1302,7 +1751,7 @@ function populateResultsTable() {
         if (isPredictionMode) {
             // Find prediction for this tree
             const treeIdStr = treeId.toString();
-            const treeData = predictionData.find(p => p.treeId === treeIdStr);
+            const treeData = getPredictionForTree(treeIdStr);
             
             if (treeData) {
                 if (treeData.isTraining) {
@@ -1315,9 +1764,6 @@ function populateResultsTable() {
                         <span style="color:#FFC107; font-weight:bold;">
                             TRAINING
                         </span>
-                    </td>
-                    <td>
-                        <button class="view-tree-btn" data-tree-id="${treeId}">View</button>
                     </td>
                 `;
                     
@@ -1337,9 +1783,6 @@ function populateResultsTable() {
                         <span style="color:${statusColor}; font-weight:bold;">
                             ${treeData.correct ? '✓' : '✗'} ${statusText}
                         </span>
-                    </td>
-                    <td>
-                        <button class="view-tree-btn" data-tree-id="${treeId}">View</button>
                     </td>
                 `;
                     
@@ -1372,79 +1815,21 @@ function populateResultsTable() {
         
         row.style.cursor = 'pointer';
         row.addEventListener('click', () => {
-            // Find the corresponding layer and zoom to it.
-            const geoJsonLayer = treeLayers.getLayers()[0];
-            if (geoJsonLayer && geoJsonLayer.getLayers) {
-                const treeLayer = geoJsonLayer.getLayers().find(
-                    layer => layer.feature.properties.tree_id === props.tree_id
-                );
-                if (treeLayer) {
-                    map.fitBounds(treeLayer.getBounds().pad(0.1));
-                    treeLayer.openPopup();
-                }
-            }
+            selectedTreeId = treeId.toString();
+            highlightSelectedRow();
+            focusTreeOnMap(selectedTreeId);
         });
         
         tableBody.appendChild(row);
     });
-    
-    // Add event listeners to view buttons if in prediction mode
-    if (isPredictionMode) {
-        document.querySelectorAll('.view-tree-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                e.stopPropagation(); // Prevent row click
-                const treeId = btn.getAttribute('data-tree-id');
-                
-                // Find and zoom to the tree
-                const geoJsonLayer = treeLayers.getLayers()[0];
-                if (geoJsonLayer && geoJsonLayer.getLayers) {
-                    const treeLayer = geoJsonLayer.getLayers().find(
-                        layer => layer.feature.properties.tree_id === treeId
-                    );
-                    if (treeLayer) {
-                        map.fitBounds(treeLayer.getBounds().pad(0.1));
-                        treeLayer.openPopup();
-                    }
-                }
-            });
-        });
-    }
-    
-    // Update the status to show how many trees are displayed
-    updateDataStatus(`Showing ${treesToShow.length} of ${originalTreeData.length} trees`);
+
+    highlightSelectedRow();
 }
 // --- Utility and Minor Functions ---
 
 function filterTableData(searchTerm) { 
-    const term = searchTerm.toLowerCase();
-    
-    // Update the table rows
-    const rows = document.querySelectorAll('#tableBody tr');
-    rows.forEach(row => {
-        const rowText = row.textContent.toLowerCase();
-        row.style.display = rowText.includes(term) ? '' : 'none';
-    });
-    
-    // Also filter the map data
-    if (searchTerm.trim() === '') {
-        // If search is cleared, show all data
-        filteredData = [...originalTreeData];
-    } else {
-        // Filter map data based on search term
-        filteredData = originalTreeData.filter(tree => {
-            const props = tree.properties;
-            const treeId = props.tree_id || props.id || '';
-            const species = props.Cmmn_Nm || props.cmmn_nm || props.species || props.SPECIES || props.Species || props.ground_truth_species || '';
-            
-            // Check if search term is in ID or species
-            return treeId.toString().toLowerCase().includes(term) || 
-                   species.toString().toLowerCase().includes(term);
-        });
-    }
-    
-    // Update the map with filtered data
-    addTreesToMap();
-    updateDataStatus(`Showing ${filteredData.length} of ${originalTreeData.length} trees`);
+    currentSearchTerm = searchTerm ?? '';
+    refreshDataViews({ preserveSelection: true });
 }
 
 function sortTable(column) { 
@@ -1454,15 +1839,7 @@ function sortTable(column) {
         currentSortColumn = column;
         currentSortDirection = 'asc';
     }
-    filteredData.sort((a, b) => {
-        let aVal = a.properties[column];
-        let bVal = b.properties[column];
-        if (typeof aVal === 'string') { aVal = aVal.toLowerCase(); bVal = bVal.toLowerCase(); }
-        if (currentSortDirection === 'asc') { return aVal < bVal ? -1 : aVal > bVal ? 1 : 0; } 
-        else { return aVal > bVal ? -1 : aVal < bVal ? 1 : 0; }
-    });
-    populateResultsTable();
-    updateSortIndicators();
+    refreshDataViews({ preserveSelection: true });
 }
 
 function updateSortIndicators() { 
@@ -1474,17 +1851,38 @@ function updateSortIndicators() {
     });
 }
 
-function updateModelPerformance() { 
-    if (originalTreeData.length === 0) return;
-    const evalItems = originalTreeData.filter(t => t.properties.status !== 'Training');
-    if (evalItems.length === 0) return;
-    const correct = evalItems.filter(t => t.properties.predicted_species === t.properties.ground_truth_species).length;
-    const accuracy = ((correct / evalItems.length) * 100).toFixed(1);
-    const { precisionMacro, recallMacro, f1Macro } = computePerClassMetrics(evalItems);
-    document.getElementById('accuracy').textContent = `${accuracy}%`;
-    document.getElementById('precision').textContent = precisionMacro.toFixed(3);
-    document.getElementById('recall').textContent = recallMacro.toFixed(3);
-    document.getElementById('f1score').textContent = f1Macro.toFixed(3);
+function updateModelPerformance() {
+    const setValue = (elementId, value) => {
+        const element = document.getElementById(elementId);
+        if (element) {
+            element.textContent = value ?? '—';
+        }
+    };
+
+    const getMetricValue = (key) => {
+        if (!predictionMetrics || typeof predictionMetrics !== 'object') {
+            return null;
+        }
+        if (!Object.prototype.hasOwnProperty.call(predictionMetrics, key)) {
+            return null;
+        }
+        const rawValue = predictionMetrics[key];
+        if (rawValue === null || rawValue === undefined || rawValue === '') {
+            return null;
+        }
+        const numeric = Number(rawValue);
+        return Number.isFinite(numeric) ? numeric : null;
+    };
+
+    const overall = getMetricValue('OA');
+    const macroAccuracy = getMetricValue('MCA');
+    const f1Score = getMetricValue('F1');
+    const kappa = getMetricValue('KA');
+
+    setValue('modelOverallAccuracy', formatPercent(overall));
+    setValue('modelMacroAccuracy', formatPercent(macroAccuracy));
+    setValue('modelF1Score', formatPercent(f1Score));
+    setValue('modelKappa', kappa === null ? '—' : formatNumber(kappa, 3) ?? kappa.toString());
 }
 
 function computePerClassMetrics(items) { 
@@ -1513,8 +1911,271 @@ function computePerClassMetrics(items) {
     return { labels, conf: matrix, perClass, precisionMacro, recallMacro, f1Macro };
 }
 
-function renderConfusionMatrix() { /* Stub */ }
-function renderPerClassMetrics() { /* Stub */ }
+function computePredictionSummary(data) {
+    const testItems = data.filter(item => !item.isTraining);
+    if (testItems.length === 0) {
+        return null;
+    }
+
+    const labelSet = new Set();
+    testItems.forEach(item => {
+        if (item.actual) labelSet.add(item.actual);
+        if (item.predicted) labelSet.add(item.predicted);
+    });
+
+    const labels = Array.from(labelSet).sort((a, b) => a.localeCompare(b));
+    if (labels.length === 0) {
+        return null;
+    }
+
+    const index = new Map(labels.map((label, position) => [label, position]));
+    const matrix = Array.from({ length: labels.length }, () => Array(labels.length).fill(0));
+
+    testItems.forEach(({ actual, predicted }) => {
+        if (!index.has(actual) || !index.has(predicted)) {
+            return;
+        }
+        matrix[index.get(actual)][index.get(predicted)] += 1;
+    });
+
+    const perClass = labels.map((label, i) => {
+        const row = matrix[i];
+        const tp = matrix[i][i];
+        const fp = matrix.reduce((sum, currentRow, rowIndex) => (rowIndex === i ? sum : sum + currentRow[i]), 0);
+        const fn = row.reduce((sum, value, columnIndex) => (columnIndex === i ? sum : sum + value), 0);
+        const support = row.reduce((sum, value) => sum + value, 0);
+        const precision = tp + fp === 0 ? 0 : tp / (tp + fp);
+        const recall = tp + fn === 0 ? 0 : tp / (tp + fn);
+        const f1 = precision + recall === 0 ? 0 : (2 * precision * recall) / (precision + recall);
+        return { label, tp, fp, fn, support, precision, recall, f1 };
+    });
+
+    const totalSupport = testItems.length;
+    const totalCorrect = labels.reduce((sum, _, idx) => sum + matrix[idx][idx], 0);
+    const accuracy = totalSupport === 0 ? 0 : totalCorrect / totalSupport;
+
+    const precisionMacro = perClass.reduce((sum, metric) => sum + metric.precision, 0) / perClass.length || 0;
+    const recallMacro = perClass.reduce((sum, metric) => sum + metric.recall, 0) / perClass.length || 0;
+    const f1Macro = perClass.reduce((sum, metric) => sum + metric.f1, 0) / perClass.length || 0;
+
+    const precisionWeighted = perClass.reduce((sum, metric) => sum + metric.precision * metric.support, 0) /
+        (totalSupport || 1);
+    const recallWeighted = perClass.reduce((sum, metric) => sum + metric.recall * metric.support, 0) /
+        (totalSupport || 1);
+    const f1Weighted = perClass.reduce((sum, metric) => sum + metric.f1 * metric.support, 0) /
+        (totalSupport || 1);
+
+    return {
+        labels,
+        matrix,
+        perClass,
+        totals: {
+            support: totalSupport,
+            correct: totalCorrect,
+            accuracy,
+            precisionMacro,
+            recallMacro,
+            f1Macro,
+            precisionWeighted,
+            recallWeighted,
+            f1Weighted,
+        },
+    };
+}
+
+function renderConfusionMatrix(summary = predictionSummary) {
+    const container = document.getElementById('confusionMatrix');
+    if (!container) {
+        return;
+    }
+
+    container.innerHTML = '';
+
+    if (!summary) {
+        container.innerHTML = '<p>No prediction results available.</p>';
+        return;
+    }
+
+    const table = document.createElement('table');
+    table.className = 'cm-table';
+
+    const thead = document.createElement('thead');
+    const headerRow = document.createElement('tr');
+
+    const corner = document.createElement('th');
+    corner.textContent = 'Actual \\ Predicted';
+    headerRow.appendChild(corner);
+
+    summary.labels.forEach((label) => {
+        const th = document.createElement('th');
+        th.textContent = label;
+        headerRow.appendChild(th);
+    });
+
+    const totalHeader = document.createElement('th');
+    totalHeader.textContent = 'Total';
+    headerRow.appendChild(totalHeader);
+
+    thead.appendChild(headerRow);
+    table.appendChild(thead);
+
+    const tbody = document.createElement('tbody');
+
+    summary.labels.forEach((label, rowIndex) => {
+        const row = document.createElement('tr');
+
+        const labelCell = document.createElement('th');
+        labelCell.textContent = label;
+        row.appendChild(labelCell);
+
+        let rowTotal = 0;
+        summary.labels.forEach((_, columnIndex) => {
+            const value = summary.matrix[rowIndex][columnIndex];
+            rowTotal += value;
+
+            const cell = document.createElement('td');
+            cell.textContent = value;
+            if (rowIndex === columnIndex) {
+                cell.classList.add('diag');
+            }
+            row.appendChild(cell);
+        });
+
+        const totalCell = document.createElement('td');
+        totalCell.textContent = rowTotal;
+        row.appendChild(totalCell);
+
+        tbody.appendChild(row);
+    });
+
+    const footerRow = document.createElement('tr');
+    const footerLabel = document.createElement('th');
+    footerLabel.textContent = 'Total';
+    footerRow.appendChild(footerLabel);
+
+    summary.labels.forEach((_, columnIndex) => {
+        const columnTotal = summary.matrix.reduce((sum, row) => sum + row[columnIndex], 0);
+        const cell = document.createElement('td');
+        cell.textContent = columnTotal;
+        footerRow.appendChild(cell);
+    });
+
+    const overallCell = document.createElement('td');
+    overallCell.textContent = summary.totals.support;
+    footerRow.appendChild(overallCell);
+
+    const tfoot = document.createElement('tfoot');
+    tfoot.appendChild(footerRow);
+    table.appendChild(tbody);
+    table.appendChild(tfoot);
+
+    const caption = document.createElement('p');
+    caption.style.marginTop = '10px';
+    caption.textContent = `Overall accuracy: ${(summary.totals.accuracy * 100).toFixed(2)}%`;
+
+    container.appendChild(table);
+    container.appendChild(caption);
+}
+
+function renderPerClassMetrics(summary = predictionSummary) {
+    const container = document.getElementById('perClassMetrics');
+    if (!container) {
+        return;
+    }
+
+    container.innerHTML = '';
+
+    if (!summary) {
+        container.innerHTML = '<p>No prediction results available.</p>';
+        return;
+    }
+
+    const table = document.createElement('table');
+    table.className = 'cm-table';
+
+    const thead = document.createElement('thead');
+    const headerRow = document.createElement('tr');
+    ['Class', 'Precision', 'Recall', 'F1-Score', 'Support'].forEach((heading) => {
+        const th = document.createElement('th');
+        th.textContent = heading;
+        headerRow.appendChild(th);
+    });
+    thead.appendChild(headerRow);
+    table.appendChild(thead);
+
+    const tbody = document.createElement('tbody');
+    summary.perClass.forEach((metric) => {
+        const row = document.createElement('tr');
+
+        const cells = [
+            metric.label,
+            (metric.precision * 100).toFixed(2) + '%',
+            (metric.recall * 100).toFixed(2) + '%',
+            (metric.f1 * 100).toFixed(2) + '%',
+            metric.support,
+        ];
+
+        cells.forEach((value) => {
+            const cell = document.createElement('td');
+            cell.textContent = value;
+            row.appendChild(cell);
+        });
+
+        tbody.appendChild(row);
+    });
+
+    const footer = document.createElement('tfoot');
+    const summaryRow = document.createElement('tr');
+    const labelCell = document.createElement('th');
+    labelCell.textContent = 'Macro Avg.';
+    summaryRow.appendChild(labelCell);
+
+    const precisionCell = document.createElement('td');
+    precisionCell.textContent = (summary.totals.precisionMacro * 100).toFixed(2) + '%';
+    summaryRow.appendChild(precisionCell);
+
+    const recallCell = document.createElement('td');
+    recallCell.textContent = (summary.totals.recallMacro * 100).toFixed(2) + '%';
+    summaryRow.appendChild(recallCell);
+
+    const f1Cell = document.createElement('td');
+    f1Cell.textContent = (summary.totals.f1Macro * 100).toFixed(2) + '%';
+    summaryRow.appendChild(f1Cell);
+
+    const supportCell = document.createElement('td');
+    supportCell.textContent = summary.totals.support;
+    summaryRow.appendChild(supportCell);
+
+    footer.appendChild(summaryRow);
+
+    const weightedRow = document.createElement('tr');
+    const weightedLabel = document.createElement('th');
+    weightedLabel.textContent = 'Weighted Avg.';
+    weightedRow.appendChild(weightedLabel);
+
+    const weightedPrecision = document.createElement('td');
+    weightedPrecision.textContent = (summary.totals.precisionWeighted * 100).toFixed(2) + '%';
+    weightedRow.appendChild(weightedPrecision);
+
+    const weightedRecall = document.createElement('td');
+    weightedRecall.textContent = (summary.totals.recallWeighted * 100).toFixed(2) + '%';
+    weightedRow.appendChild(weightedRecall);
+
+    const weightedF1 = document.createElement('td');
+    weightedF1.textContent = (summary.totals.f1Weighted * 100).toFixed(2) + '%';
+    weightedRow.appendChild(weightedF1);
+
+    const weightedSupport = document.createElement('td');
+    weightedSupport.textContent = summary.totals.support;
+    weightedRow.appendChild(weightedSupport);
+
+    footer.appendChild(weightedRow);
+
+    table.appendChild(tbody);
+    table.appendChild(footer);
+
+    container.appendChild(table);
+}
 
 function hideLoadingIndicator() {
     const loadingIndicator = document.getElementById('loadingIndicator');

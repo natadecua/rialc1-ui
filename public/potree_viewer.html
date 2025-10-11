@@ -147,6 +147,9 @@
 	
 	<script type="module">
 		import * as THREE from "/Potree_1.8.2/libs/three.js/build/three.module.js";
+		const potreeBaseUrl = `${window.location.origin}/Potree_1.8.2/build/potree`;
+		Potree.scriptPath = potreeBaseUrl;
+		Potree.resourcePath = `${potreeBaseUrl}/resources`;
 	
 		// Initialize the viewer
 		window.viewer = new Potree.Viewer(document.getElementById("potree_render_area"));

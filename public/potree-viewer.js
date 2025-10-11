@@ -560,6 +560,9 @@ async function initializePotreeViewer() {
 
     const viewer = new Potree.Viewer(renderArea);
     window.viewer = viewer;
+    const potreeBaseUrl = `${window.location.origin}/Potree_1.8.2/build/potree`;
+    Potree.scriptPath = potreeBaseUrl;
+    Potree.resourcePath = `${potreeBaseUrl}/resources`;
 
     viewer.setFOV(60);
     viewer.setEDLEnabled(true);

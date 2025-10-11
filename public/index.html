@@ -112,34 +112,48 @@
                 <span class="sr-only">Toggle insights panel</span>
             </button>
             <div class="panel-content">
-                <section class="onboarding-section" aria-label="Getting started hints">
-                    <h3>Quick Start</h3>
-                    <ul>
-                        <li>Use the <strong>Display Mode</strong> switch to compare species coloring with model predictions.</li>
-                        <li>Press <kbd>Tab</kbd> to move between filters, then hit <kbd>Space</kbd> to toggle them.</li>
-                        <li>Select any tree row to focus the map or open the 3D viewer for a full point cloud experience.</li>
-                    </ul>
-                </section>
 
                 <!-- Performance Metrics Section -->
                 <section class="performance-section">
                     <h3>Model Performance</h3>
                     <div class="metrics-grid">
                         <div class="metric">
-                            <span class="metric-label">Accuracy</span>
-                            <span class="metric-value" id="accuracy">-</span>
+                            <span class="metric-label">Overall Accuracy</span>
+                            <span class="metric-value" id="modelOverallAccuracy">-</span>
                         </div>
                         <div class="metric">
-                            <span class="metric-label">Precision</span>
-                            <span class="metric-value" id="precision">-</span>
+                            <span class="metric-label">Macro Class Accuracy</span>
+                            <span class="metric-value" id="modelMacroAccuracy">-</span>
                         </div>
                         <div class="metric">
-                            <span class="metric-label">Recall</span>
-                            <span class="metric-value" id="recall">-</span>
+                            <span class="metric-label">F1 Score</span>
+                            <span class="metric-value" id="modelF1Score">-</span>
                         </div>
                         <div class="metric">
-                            <span class="metric-label">F1-Score</span>
-                            <span class="metric-value" id="f1score">-</span>
+                            <span class="metric-label">Cohen's Kappa</span>
+                            <span class="metric-value" id="modelKappa">-</span>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="dataset-section">
+                    <h3>Tree Dataset Overview</h3>
+                    <div class="metrics-grid metrics-grid--compact">
+                        <div class="metric">
+                            <span class="metric-label">Total Trees</span>
+                            <span class="metric-value" id="datasetTotalTrees">-</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Species Types</span>
+                            <span class="metric-value" id="datasetSpeciesTypes">-</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Total Area</span>
+                            <span class="metric-value" id="datasetTotalArea">-</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Avg. Crown Diameter</span>
+                            <span class="metric-value" id="datasetAvgCrown">-</span>
                         </div>
                     </div>
                 </section>

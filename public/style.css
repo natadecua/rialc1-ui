@@ -725,10 +725,33 @@ body.potree-overlay-open {
     font-weight: 600;
 }
 
+.dataset-section {
+    margin-bottom: 30px;
+}
+
+.dataset-section h3 {
+    color: #2c3e50;
+    margin-bottom: 15px;
+    font-size: 1.1rem;
+    font-weight: 600;
+}
+
 .metrics-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 15px;
+}
+
+.metrics-grid--compact .metric {
+    padding: 12px;
+}
+
+.metrics-grid--compact .metric-label {
+    font-size: 0.8rem;
+}
+
+.metrics-grid--compact .metric-value {
+    font-size: 1.3rem;
 }
 
 .metric {
@@ -1198,6 +1221,20 @@ body.potree-overlay-open {
 
 .popup-3d-button:hover {
     background: #0056b3;
+}
+
+/* Tree attribute popup formatting */
+.leaflet-popup-content .popup-field {
+    margin-bottom: 4px;
+    font-size: 0.75rem;
+    line-height: 1.4;
+}
+
+.leaflet-popup-content .popup-field strong {
+    display: inline-block;
+    min-width: 120px;
+    font-weight: 600;
+    color: #1f2937;
 }
 
 /* Leaflet Tooltip Customization */

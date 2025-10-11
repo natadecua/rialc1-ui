@@ -32,6 +32,7 @@ export function createSpeciesColorHelper() {
     const {
       isPredictionMode = false,
       predictionData = [],
+      predictionIndex = null,
       trainingColor = '#FFC107',
       correctColor = '#4CAF50',
       incorrectColor = '#F44336',
@@ -39,7 +40,7 @@ export function createSpeciesColorHelper() {
 
     if (isPredictionMode && treeId) {
       const treeIdStr = treeId.toString();
-      const treeData = predictionData.find((entry) => entry.treeId === treeIdStr);
+      const treeData = predictionIndex?.get(treeIdStr) ?? predictionData.find((entry) => entry.treeId === treeIdStr);
 
       if (treeData) {
         if (treeData.isTraining) {

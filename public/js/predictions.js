@@ -1,9 +1,11 @@
-export async function loadPredictionData(url = '/raw_data/prediction_results_top5.csv', treeDataMap = null) {
+export async function loadPredictionData(url = '/raw_data/prediction_results_top5_metrics.csv', treeDataMap = null) {
     try {
         const response = await fetch(url);
         const csv = await response.text();
 
         const lines = csv.split('\n');
+        const dataRows = [];
+        const metrics = {};
         
         // Create a mapping of tree_id to species name from the shapefile data
         const treeIdToSpecies = {};
@@ -26,25 +28,57 @@ export async function loadPredictionData(url = '/raw_data/prediction_results_top
         // First pass: collect all species per group to determine the most representative species
         const groupSpeciesCounts = {};
 
-        for (let i = 1; i < lines.length; i++) {
-            if (!lines[i].trim()) continue;
+        const normaliseTreeId = (value) => {
+            if (!value) {
+                return '';
+            }
+            const trimmed = value.trim();
+            if (!trimmed) {
+                return '';
+            }
+            return trimmed.endsWith('.0') ? trimmed.slice(0, -2) : trimmed;
+        };
 
-            const values = lines[i].split(',');
-            let treeId = values[0].trim();
-            if (treeId.endsWith('.0')) {
-                treeId = treeId.substring(0, treeId.length - 2);
+        for (let i = 1; i < lines.length; i++) {
+            const rawLine = lines[i];
+            if (!rawLine || !rawLine.trim()) {
+                continue;
             }
 
-            const actualGroup = values[1].trim();
+            const values = rawLine.split(',').map((value) => value.trim());
+            const isBlank = values.every((value) => value === '');
+            if (isBlank) {
+                continue;
+            }
+
+            const treeIdCandidate = values[0];
+            const secondaryCandidate = values[1];
+            const metricKeyCandidate = values[2];
+
+            if (!treeIdCandidate && !secondaryCandidate && metricKeyCandidate) {
+                const key = metricKeyCandidate;
+                const rawValue = values[3] ?? '';
+                const numericValue = rawValue === '' ? null : Number(rawValue);
+                metrics[key] = Number.isFinite(numericValue) ? numericValue : rawValue;
+                continue;
+            }
+
+            const treeId = normaliseTreeId(treeIdCandidate);
+            if (!treeId) {
+                continue;
+            }
+
+            dataRows.push(values);
+
+            const actualGroup = values[1]?.trim?.() ?? '';
             const cleanActualGroup = actualGroup.replace('.0', '');
             const actualSpecies = treeIdToSpecies[treeId];
-            
-            // Count species per group
+
             if (actualSpecies && cleanActualGroup) {
                 if (!groupSpeciesCounts[cleanActualGroup]) {
                     groupSpeciesCounts[cleanActualGroup] = {};
                 }
-                groupSpeciesCounts[cleanActualGroup][actualSpecies] = 
+                groupSpeciesCounts[cleanActualGroup][actualSpecies] =
                     (groupSpeciesCounts[cleanActualGroup][actualSpecies] || 0) + 1;
             }
         }
@@ -70,30 +104,21 @@ export async function loadPredictionData(url = '/raw_data/prediction_results_top
         console.log('Group to Species mapping:', groupToSpeciesMap);
 
         // Second pass: create the prediction data with proper species names
-        for (let i = 1; i < lines.length; i++) {
-            if (!lines[i].trim()) continue;
-
-            const values = lines[i].split(',');
-
-            let treeId = values[0].trim();
-            if (treeId.endsWith('.0')) {
-                treeId = treeId.substring(0, treeId.length - 2);
+        dataRows.forEach((values) => {
+            let treeId = normaliseTreeId(values[0]);
+            if (!treeId) {
+                return;
             }
 
-            const actualGroup = values[1].trim();
-            const splitType = values[2].trim();
-            // Remove .0 suffix if present for cleaner display
+            const actualGroup = (values[1] ?? '').trim();
+            const splitType = (values[2] ?? '').trim();
             const cleanActualGroup = actualGroup.replace('.0', '');
-            
-            // Get the actual species name from the shapefile data
             const actualSpecies = treeIdToSpecies[treeId] || `Group ${cleanActualGroup}`;
 
             if (splitType === 'test' && values[3] && values[3].trim() !== '') {
                 const predictedGroup = values[3].trim();
                 const cleanPredictedGroup = predictedGroup.replace('.0', '');
                 const isCorrect = values[4] && values[4].trim() === '1.0';
-                
-                // Get the predicted species name from the group mapping
                 const predictedSpecies = groupToSpeciesMap[cleanPredictedGroup] || `Group ${cleanPredictedGroup}`;
 
                 allTreeData.push({
@@ -115,7 +140,7 @@ export async function loadPredictionData(url = '/raw_data/prediction_results_top
                     dataType: 'train',
                 });
             }
-        }
+        });
 
         const testTrees = allTreeData.filter((tree) => tree.dataType === 'test');
         const trainingTrees = allTreeData.filter((tree) => tree.dataType === 'train');
@@ -130,9 +155,13 @@ export async function loadPredictionData(url = '/raw_data/prediction_results_top
             }
         }
 
-        return allTreeData;
+        if (Object.keys(metrics).length > 0) {
+            console.log('Loaded provided performance metrics:', metrics);
+        }
+
+        return { records: allTreeData, metrics };
     } catch (error) {
         console.error('Error loading prediction data:', error);
-        return [];
+        return { records: [], metrics: {} };
     }
 }

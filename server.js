@@ -11,8 +11,29 @@ app.use(cors());
 // 1. Serve the main frontend files (index.html, script.js, etc.) from the 'public' directory
 app.use(express.static(path.join(__dirname, 'public')));
 
-// 2. Serve the raw_data directory from the project root
-app.use('/raw_data', express.static(path.join(__dirname, 'raw_data')));
+// 2. Serve the raw_data directory from the project root with long-lived caching for large binaries
+const rawDataDir = path.join(__dirname, 'raw_data');
+app.use(
+  '/raw_data',
+  express.static(rawDataDir, {
+    setHeaders(res, filePath) {
+      const ext = path.extname(filePath).toLowerCase();
+
+      if (ext === '.bin' || ext === '.laz' || ext === '.las') {
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        res.setHeader('Access-Control-Expose-Headers', 'Content-Length');
+      } else if (
+        ext === '.json' ||
+        ext === '.shp' ||
+        ext === '.dbf' ||
+        ext === '.prj' ||
+        ext === '.shx'
+      ) {
+        res.setHeader('Cache-Control', 'public, max-age=86400');
+      }
+    },
+  })
+);
 
 // 3. Serve the pre-generated map tiles from our final tiles directory
 app.use('/tiles', express.static(path.join(__dirname, 'lamesa_forest_final_fixed')));
