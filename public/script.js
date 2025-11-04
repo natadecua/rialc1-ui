@@ -39,10 +39,14 @@ const PROPERTY_LABEL_OVERRIDES = {
     Class: 'Class',
     specs_d: 'Crown Diameter (m)',
     specis_d: 'Crown Diameter (m)',
+    crown_diameter_m: 'Crown Diameter (m)',
     group_d: 'Group',
     group_id: 'Group',
+    species_id: 'Species ID',
+    planar_canopy_area_m2: 'Canopy Area (2D)',
     area: 'Area',
     perimtr: 'Perimeter',
+    perimeter: 'Perimeter',
     x: 'Projected X',
     y: 'Projected Y',
     Drctn_N: 'Direction',
@@ -60,11 +64,13 @@ const PROPERTY_DISPLAY_ORDER = [
     'Family',
     'Order',
     'Class',
+    'species_id',
     'group_d',
     'group_id',
     'specs_d',
     'specis_d',
-    'area',
+    'crown_diameter_m',
+    'perimeter',
     'perimtr',
     'x',
     'y',
@@ -76,7 +82,10 @@ const PROPERTY_DISPLAY_ORDER = [
 const PROPERTY_VALUE_TRANSFORMS = {
     specs_d: (value) => formatMeasurement(value, 'm', { maximumFractionDigits: 2 }),
     specis_d: (value) => formatMeasurement(value, 'm', { maximumFractionDigits: 2 }),
+    planar_canopy_area_m2: (value) => formatArea(value),
     area: (value) => formatArea(value),
+    crown_diameter_m: (value) => formatMeasurement(value, 'm', { maximumFractionDigits: 2 }),
+    perimeter: (value) => formatMeasurement(value, 'm', { maximumFractionDigits: 2 }),
     perimtr: (value) => formatMeasurement(value, 'm', { maximumFractionDigits: 2 }),
     group_d: (value) => formatGroupLabel(value),
     group_id: (value) => formatGroupLabel(value),
@@ -84,7 +93,7 @@ const PROPERTY_VALUE_TRANSFORMS = {
     y: (value) => formatNumber(value, 3),
 };
 
-const IGNORED_PROPERTY_KEYS = new Set(['__proto__']);
+const IGNORED_PROPERTY_KEYS = new Set(['__proto__', 'area', 'planar_canopy_area_m2']);
 const PLACEHOLDER_STRINGS = new Set(['', 'null', 'undefined', 'nan', 'n/a', 'na', 'none', 'not available']);
 const HTML_ESCAPE_MAP = {
     '&': '&amp;',
@@ -116,7 +125,7 @@ function formatNumber(value, fractionDigits = 2) {
 
 function formatMeasurement(rawValue, unit = '', options = {}) {
     const numeric = typeof rawValue === 'number' ? rawValue : Number(rawValue);
-    if (!Number.isFinite(numeric)) {
+    if (!Number.isFinite(numeric) || numeric <= 0) {
         return null;
     }
 
@@ -157,6 +166,224 @@ function formatArea(value) {
         minimumFractionDigits: 0,
         maximumFractionDigits: 2,
     })} m²`;
+}
+
+function deriveCrownDiameterFromArea(areaSqMeters) {
+    const numeric = typeof areaSqMeters === 'number' ? areaSqMeters : Number(areaSqMeters);
+    if (!Number.isFinite(numeric) || numeric <= 0) {
+        return null;
+    }
+
+    return 2 * Math.sqrt(numeric / Math.PI);
+}
+
+function computeGeodesicFeatureArea(latLngs) {
+    if (typeof L === 'undefined' || !L.GeometryUtil || typeof L.GeometryUtil.geodesicArea !== 'function') {
+        return null;
+    }
+
+    const compute = (coords) => {
+        if (!Array.isArray(coords) || coords.length === 0) {
+            return 0;
+        }
+
+        const first = coords[0];
+
+        if (first && typeof first.lat === 'number') {
+            return L.GeometryUtil.geodesicArea(coords);
+        }
+
+        if (Array.isArray(first)) {
+            const firstElement = first.length > 0 ? first[0] : null;
+
+            if (firstElement && typeof firstElement.lat === 'number') {
+                const outerArea = Math.abs(L.GeometryUtil.geodesicArea(first));
+                const holesArea = coords.slice(1).reduce((sum, hole) => {
+                    if (!Array.isArray(hole) || hole.length === 0) {
+                        return sum;
+                    }
+
+                    return sum + Math.abs(L.GeometryUtil.geodesicArea(hole));
+                }, 0);
+
+                return outerArea - holesArea;
+            }
+
+            return coords.reduce((sum, part) => sum + compute(part), 0);
+        }
+
+        return 0;
+    };
+
+    const area = compute(latLngs);
+    if (!Number.isFinite(area)) {
+        return null;
+    }
+
+    const normalisedArea = Math.abs(area);
+    return normalisedArea > 0 ? normalisedArea : null;
+}
+
+function computePlanarCanopyArea(input) {
+    if (typeof proj4 === 'undefined' || typeof proj4 !== 'function') {
+        return null;
+    }
+
+    const hasProjection = typeof proj4.defs === 'function' && proj4.defs('EPSG:3123') && proj4.defs('EPSG:4326');
+    if (!hasProjection) {
+        return null;
+    }
+
+    const toLatLng = (point) => {
+        if (!point) {
+            return null;
+        }
+
+        if (Array.isArray(point) && point.length >= 2) {
+            const [lng, lat] = point;
+            return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+        }
+
+        if (typeof point.lat === 'number' && typeof point.lng === 'number') {
+            return { lat: point.lat, lng: point.lng };
+        }
+
+        if (typeof point.lat === 'number' && typeof point.lon === 'number') {
+            return { lat: point.lat, lng: point.lon };
+        }
+
+        if (typeof point.latitude === 'number' && typeof point.longitude === 'number') {
+            return { lat: point.latitude, lng: point.longitude };
+        }
+
+        return null;
+    };
+
+    const normaliseRing = (ring) => {
+        if (!Array.isArray(ring)) {
+            return null;
+        }
+
+        const latLngs = ring.map(toLatLng).filter(Boolean);
+        return latLngs.length >= 3 ? latLngs : null;
+    };
+
+    const normalisePolygon = (polygon) => {
+        if (!Array.isArray(polygon)) {
+            return null;
+        }
+
+        const rings = polygon.map(normaliseRing).filter(Boolean);
+        return rings.length > 0 ? rings : null;
+    };
+
+    const normaliseInput = (value) => {
+        if (!value) {
+            return null;
+        }
+
+        if (Array.isArray(value)) {
+            if (value.length === 0) {
+                return null;
+            }
+
+            const first = value[0];
+
+            if (first && typeof first.lat === 'number') {
+                const ring = normaliseRing(value);
+                return ring ? [ [ ring ] ] : null;
+            }
+
+            if (Array.isArray(first)) {
+                const second = first[0];
+
+                if (second && typeof second.lat === 'number') {
+                    const rings = value.map(normaliseRing).filter(Boolean);
+                    return rings.length > 0 ? [ rings ] : null;
+                }
+
+                if (Array.isArray(second)) {
+                    const polygons = value.map(normalisePolygon).filter(Boolean);
+                    return polygons.length > 0 ? polygons : null;
+                }
+            }
+
+            return null;
+        }
+
+        if (value && typeof value === 'object' && value.type && value.coordinates) {
+            if (value.type === 'Polygon') {
+                const polygon = normalisePolygon(value.coordinates);
+                return polygon ? [ polygon ] : null;
+            }
+
+            if (value.type === 'MultiPolygon') {
+                const polygons = value.coordinates.map(normalisePolygon).filter(Boolean);
+                return polygons.length > 0 ? polygons : null;
+            }
+        }
+
+        return null;
+    };
+
+    const projectPoint = ({ lat, lng }) => {
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+            return null;
+        }
+
+        try {
+            const projected = proj4('EPSG:4326', 'EPSG:3123', [lng, lat]);
+            if (!Array.isArray(projected) || projected.length < 2) {
+                return null;
+            }
+            return { x: projected[0], y: projected[1] };
+        } catch (error) {
+            console.warn('Projection error while computing planar area:', error);
+            return null;
+        }
+    };
+
+    const computeRingArea = (ring) => {
+        const points = ring.map(projectPoint).filter(Boolean);
+        if (points.length < 3) {
+            return 0;
+        }
+
+        let sum = 0;
+        for (let i = 0; i < points.length; i += 1) {
+            const current = points[i];
+            const next = points[(i + 1) % points.length];
+            sum += current.x * next.y - next.x * current.y;
+        }
+
+        return Math.abs(sum) / 2;
+    };
+
+    const polygons = normaliseInput(input);
+    if (!polygons) {
+        return null;
+    }
+
+    let total = 0;
+    polygons.forEach((polygon) => {
+        if (!Array.isArray(polygon) || polygon.length === 0) {
+            return;
+        }
+
+        const outerArea = computeRingArea(polygon[0]);
+        const holesArea = polygon.slice(1).reduce((sum, ring) => sum + computeRingArea(ring), 0);
+        const polygonArea = outerArea - holesArea;
+
+        if (Number.isFinite(polygonArea) && polygonArea > 0) {
+            total += polygonArea;
+        }
+    });
+
+    if (!Number.isFinite(total) || total <= 0) {
+        return null;
+    }
+
+    return total;
 }
 
 function normalisePropertyValue(value) {
@@ -281,6 +508,14 @@ function buildPropertyDetails(props = {}) {
         .map(([key, value]) => {
             const formattedValue = formatPropertyValue(key, value);
             if (formattedValue === null || formattedValue === '') {
+                return null;
+            }
+
+            if (
+                key === 'ground_truth_species' &&
+                typeof formattedValue === 'string' &&
+                formattedValue.trim().toLowerCase() === 'unknown'
+            ) {
                 return null;
             }
 
@@ -582,6 +817,18 @@ function applyCurrentSort(data) {
             return Number.isNaN(numeric) ? treeId : numeric;
         }
 
+        if (currentSortColumn === 'area') {
+            const raw = coalesceProperty(props, ['planar_canopy_area_m2', 'area']);
+            const numeric = Number(raw);
+            return Number.isFinite(numeric) ? numeric : 0;
+        }
+
+        if (currentSortColumn === 'crown_diameter_m' || currentSortColumn === 'specs_d') {
+            const raw = coalesceProperty(props, ['crown_diameter_m', 'specs_d', 'specis_d', 'crown_width', 'width', 'WIDTH']);
+            const numeric = Number(raw);
+            return Number.isFinite(numeric) ? numeric : 0;
+        }
+
         if (isPredictionMode) {
             const prediction = getPredictionForTree(props.tree_id);
             switch (currentSortColumn) {
@@ -597,6 +844,16 @@ function applyCurrentSort(data) {
                         return 0;
                     }
                     return prediction.correct ? 1 : 2;
+                case 'area': {
+                    const raw = coalesceProperty(props, ['planar_canopy_area_m2', 'area']);
+                    const numeric = Number(raw);
+                    return Number.isFinite(numeric) ? numeric : 0;
+                }
+                case 'crown_diameter_m': {
+                    const raw = coalesceProperty(props, ['crown_diameter_m', 'specs_d', 'specis_d', 'crown_width', 'width', 'WIDTH']);
+                    const numeric = Number(raw);
+                    return Number.isFinite(numeric) ? numeric : 0;
+                }
                 default:
                     break;
             }
@@ -879,12 +1136,16 @@ async function loadData() {
 /**
  * Creates a species legend for the map
  */
-function collectSpeciesData() {
+function collectSpeciesData(sourceFeatures = null) {
+    const effectiveSource = Array.isArray(sourceFeatures) && sourceFeatures.length > 0
+        ? sourceFeatures
+        : (Array.isArray(filteredData) && filteredData.length > 0 ? filteredData : originalTreeData);
+
     // Get unique species from the data with all attributes
     const speciesInfo = {};
     
-    originalTreeData.forEach(tree => {
-        const props = tree.properties;
+    effectiveSource.forEach(tree => {
+        const props = tree.properties || {};
         const commonName = props.Cmmn_Nm || props.cmmn_nm || 'Unknown';
         
         if (commonName !== 'Unknown') {
@@ -928,168 +1189,155 @@ function createSpeciesLegend() {
         div.style.maxHeight = '300px';
         div.style.overflowY = 'auto';
         div.style.minWidth = '180px';
+
+        const activeFeatures = Array.isArray(filteredData) && filteredData.length > 0 ? filteredData : originalTreeData;
         
         if (isPredictionMode) {
             // Prediction mode legend
             div.innerHTML = '<div style="font-weight: bold; margin-bottom: 8px; font-size: 14px;">Prediction Results</div>';
-            
-            // Count correct, incorrect predictions and training trees
-            let correctCount = 0;
-            let incorrectCount = 0;
-            let trainingCount = 0;
-            
-            predictionData.forEach(tree => {
-                if (tree.isTraining) {
-                    trainingCount++;
-                } else if (tree.correct) {
-                    correctCount++;
+
+            const stats = {
+                training: 0,
+                correct: 0,
+                incorrect: 0,
+                groups: new Map(),
+            };
+
+            activeFeatures.forEach(feature => {
+                const treeId = feature?.properties?.tree_id;
+                if (!treeId) {
+                    return;
+                }
+
+                const prediction = getPredictionForTree(treeId);
+                if (!prediction) {
+                    return;
+                }
+
+                if (prediction.isTraining) {
+                    stats.training += 1;
+                } else if (prediction.correct) {
+                    stats.correct += 1;
                 } else {
-                    incorrectCount++;
+                    stats.incorrect += 1;
+                }
+
+                const groupKey = prediction.actualGroup || 'Unknown';
+                if (!stats.groups.has(groupKey)) {
+                    stats.groups.set(groupKey, {
+                        count: 0,
+                        species: prediction.actual || null,
+                    });
+                }
+
+                const entry = stats.groups.get(groupKey);
+                entry.count += 1;
+                if (!entry.species && prediction.actual) {
+                    entry.species = prediction.actual;
                 }
             });
-            
-            // Calculate total test predictions
-            const totalPredictions = correctCount + incorrectCount;
-            const totalTrees = totalPredictions + trainingCount;
-            
-            // Create legend item for training data
-            const trainingItem = document.createElement('div');
-            trainingItem.style.display = 'flex';
-            trainingItem.style.alignItems = 'center';
-            trainingItem.style.marginBottom = '5px';
-            
-            const trainingColorBox = document.createElement('span');
-            trainingColorBox.style.display = 'inline-block';
-            trainingColorBox.style.width = '15px';
-            trainingColorBox.style.height = '15px';
-            trainingColorBox.style.backgroundColor = '#FFC107';
-            trainingColorBox.style.marginRight = '5px';
-            trainingColorBox.style.borderRadius = '3px';
-            
-            const trainingLabel = document.createElement('span');
-            trainingLabel.textContent = `Training Data (${trainingCount})`;
-            trainingLabel.style.fontSize = '12px';
-            
-            trainingItem.appendChild(trainingColorBox);
-            trainingItem.appendChild(trainingLabel);
-            div.appendChild(trainingItem);
-            
-            // Add a separator
-            if (trainingCount > 0 && totalPredictions > 0) {
-                const separatorTrain = document.createElement('hr');
-                separatorTrain.style.margin = '10px 0';
-                separatorTrain.style.border = 'none';
-                separatorTrain.style.borderTop = '1px solid #eee';
-                div.appendChild(separatorTrain);
+
+            const totalPredictions = stats.correct + stats.incorrect;
+            const totalTrees = totalPredictions + stats.training;
+
+            if (totalTrees === 0) {
+                const emptyMessage = document.createElement('div');
+                emptyMessage.style.fontSize = '12px';
+                emptyMessage.style.color = '#555';
+                emptyMessage.textContent = 'No prediction records match the current filters.';
+                div.appendChild(emptyMessage);
+                return div;
             }
-            
-            // Only show test predictions if there are any
+
+            const appendLegendRow = (label, count, color) => {
+                const item = document.createElement('div');
+                item.style.display = 'flex';
+                item.style.alignItems = 'center';
+                item.style.marginBottom = '5px';
+
+                const colorBox = document.createElement('span');
+                colorBox.style.display = 'inline-block';
+                colorBox.style.width = '15px';
+                colorBox.style.height = '15px';
+                colorBox.style.backgroundColor = color;
+                colorBox.style.marginRight = '5px';
+                colorBox.style.borderRadius = '3px';
+
+                const labelSpan = document.createElement('span');
+                labelSpan.textContent = `${label} (${count})`;
+                labelSpan.style.fontSize = '12px';
+
+                item.appendChild(colorBox);
+                item.appendChild(labelSpan);
+                div.appendChild(item);
+            };
+
+            appendLegendRow('Training Data', stats.training, '#FFC107');
+            appendLegendRow('Correct', stats.correct, '#4CAF50');
+            appendLegendRow('Incorrect', stats.incorrect, '#F44336');
+
+            const separator = document.createElement('hr');
+            separator.style.margin = '10px 0';
+            separator.style.border = 'none';
+            separator.style.borderTop = '1px solid #eee';
+            div.appendChild(separator);
+
             if (totalPredictions > 0) {
-                // Create legend items for correct predictions
-                const correctItem = document.createElement('div');
-                correctItem.style.display = 'flex';
-                correctItem.style.alignItems = 'center';
-                correctItem.style.marginBottom = '5px';
-                
-                const correctColorBox = document.createElement('span');
-                correctColorBox.style.display = 'inline-block';
-                correctColorBox.style.width = '15px';
-                correctColorBox.style.height = '15px';
-                correctColorBox.style.backgroundColor = '#4CAF50';
-                correctColorBox.style.marginRight = '5px';
-                correctColorBox.style.borderRadius = '3px';
-                
-                const correctLabel = document.createElement('span');
-                correctLabel.textContent = `Correct (${correctCount})`;
-                correctLabel.style.fontSize = '12px';
-                
-                correctItem.appendChild(correctColorBox);
-                correctItem.appendChild(correctLabel);
-                div.appendChild(correctItem);
-                
-                // Create legend items for incorrect predictions
-                const incorrectItem = document.createElement('div');
-                incorrectItem.style.display = 'flex';
-                incorrectItem.style.alignItems = 'center';
-                incorrectItem.style.marginBottom = '5px';
-                
-                const incorrectColorBox = document.createElement('span');
-                incorrectColorBox.style.display = 'inline-block';
-                incorrectColorBox.style.width = '15px';
-                incorrectColorBox.style.height = '15px';
-                incorrectColorBox.style.backgroundColor = '#F44336';
-                incorrectColorBox.style.marginRight = '5px';
-                incorrectColorBox.style.borderRadius = '3px';
-                
-                const incorrectLabel = document.createElement('span');
-                incorrectLabel.textContent = `Incorrect (${incorrectCount})`;
-                incorrectLabel.style.fontSize = '12px';
-                
-                incorrectItem.appendChild(incorrectColorBox);
-                incorrectItem.appendChild(incorrectLabel);
-                div.appendChild(incorrectItem);
-                
-                // Add accuracy information
-                const accuracy = (correctCount / totalPredictions * 100).toFixed(1);
-                
-                const separator = document.createElement('hr');
-                separator.style.margin = '10px 0';
-                separator.style.border = 'none';
-                separator.style.borderTop = '1px solid #eee';
-                div.appendChild(separator);
-                
+                const accuracy = ((stats.correct / totalPredictions) * 100).toFixed(1);
                 const accuracyItem = document.createElement('div');
                 accuracyItem.style.fontSize = '13px';
                 accuracyItem.style.fontWeight = 'bold';
                 accuracyItem.textContent = `Test Accuracy: ${accuracy}%`;
                 div.appendChild(accuracyItem);
-                
-                // Add group explanation
+            } else {
+                const accuracyItem = document.createElement('div');
+                accuracyItem.style.fontSize = '13px';
+                accuracyItem.style.fontWeight = 'bold';
+                accuracyItem.textContent = 'Test Accuracy: —';
+                div.appendChild(accuracyItem);
+            }
+
+            const trainingRatio = totalTrees === 0 ? 0 : (stats.training / totalTrees) * 100;
+            const testRatio = totalTrees === 0 ? 0 : (totalPredictions / totalTrees) * 100;
+
+            const ratioItem = document.createElement('div');
+            ratioItem.style.fontSize = '12px';
+            ratioItem.style.marginTop = '5px';
+            ratioItem.textContent = `Train/Test: ${trainingRatio.toFixed(1)}% / ${testRatio.toFixed(1)}%`;
+            div.appendChild(ratioItem);
+
+            const groupEntries = Array.from(stats.groups.entries())
+                .filter(([, info]) => info && info.count > 0)
+                .sort((a, b) => b[1].count - a[1].count)
+                .slice(0, 5);
+
+            if (groupEntries.length > 0) {
+                const groupSeparator = document.createElement('hr');
+                groupSeparator.style.margin = '10px 0';
+                groupSeparator.style.border = 'none';
+                groupSeparator.style.borderTop = '1px solid #eee';
+                div.appendChild(groupSeparator);
+
                 const groupExplanation = document.createElement('div');
                 groupExplanation.style.fontSize = '11px';
-                groupExplanation.style.marginTop = '8px';
+                groupExplanation.style.marginTop = '4px';
                 groupExplanation.style.color = '#555';
-                
-                // Count trees by group and collect species names
-                const groupInfo = {};
-                predictionData.forEach(tree => {
-                    const group = tree.actualGroup || 'Unknown';
-                    if (!groupInfo[group]) {
-                        groupInfo[group] = {
-                            count: 0,
-                            species: tree.actual
-                        };
-                    }
-                    groupInfo[group].count++;
+
+                let groupText = '<strong>Species Groups (Filtered):</strong><br>';
+                groupEntries.forEach(([groupKey, info]) => {
+                    const formatted = formatGroupLabel(groupKey) || (groupKey ? `Group ${groupKey}` : 'Group Unknown');
+                    const suffixNeeded = info.species && !formatted.toLowerCase().includes(info.species.toLowerCase());
+                    const displayLabel = suffixNeeded ? `${formatted} · ${info.species}` : formatted;
+                    groupText += `${displayLabel} (${info.count})<br>`;
                 });
-                
-                let groupText = '<strong>Species Groups (Top 5):</strong><br>';
-                for (let i = 1; i <= 5; i++) {
-                    const info = groupInfo[i.toString()];
-                    if (info) {
-                        // Extract species name (remove "Group X" if it's still there)
-                        const speciesName = info.species.includes('Group') ? info.species : info.species;
-                        groupText += `Group ${i}: ${speciesName} (${info.count})<br>`;
-                    }
-                }
-                
+
                 groupExplanation.innerHTML = groupText;
                 div.appendChild(groupExplanation);
-                
-                // Add ratio information
-                const trainingRatio = (trainingCount / totalTrees * 100).toFixed(1);
-                const testRatio = (totalPredictions / totalTrees * 100).toFixed(1);
-                
-                const ratioItem = document.createElement('div');
-                ratioItem.style.fontSize = '12px';
-                ratioItem.style.marginTop = '5px';
-                ratioItem.textContent = `Train/Test: ${trainingRatio}% / ${testRatio}%`;
-                div.appendChild(ratioItem);
             }
         } else {
             // Regular species mode legend
             // Collect species data
-            const speciesData = collectSpeciesData();
+            const speciesData = collectSpeciesData(activeFeatures);
             const speciesNames = Object.keys(speciesData).sort();
             
             // Add title
@@ -1381,29 +1629,27 @@ function setupEventListeners() {
 function updateTreeStatistics() {
     const totalTreesEl = document.getElementById('datasetTotalTrees');
     const speciesEl = document.getElementById('datasetSpeciesTypes');
-    const areaEl = document.getElementById('datasetTotalArea');
     const crownEl = document.getElementById('datasetAvgCrown');
 
-    if (!totalTreesEl || !speciesEl || !areaEl || !crownEl) {
+    if (!totalTreesEl || !speciesEl || !crownEl) {
         return;
     }
 
     if (!originalTreeData || originalTreeData.length === 0) {
         totalTreesEl.textContent = '—';
         speciesEl.textContent = '—';
-        areaEl.textContent = '—';
         crownEl.textContent = '—';
         return;
     }
 
-    const { speciesCounts, totalArea } = summariseTreeDataset(originalTreeData);
+    const { speciesCounts } = summariseTreeDataset(originalTreeData);
     const totalTrees = originalTreeData.length;
     const uniqueSpecies = Object.keys(speciesCounts).length;
 
     const crownValues = originalTreeData
         .map((feature) => {
             const props = feature?.properties || {};
-            const raw = coalesceProperty(props, ['specs_d', 'specis_d', 'crown_width', 'width', 'WIDTH']);
+            const raw = coalesceProperty(props, ['crown_diameter_m', 'specs_d', 'specis_d', 'crown_width', 'width', 'WIDTH']);
             const numeric = Number(raw);
             return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
         })
@@ -1415,7 +1661,6 @@ function updateTreeStatistics() {
 
     totalTreesEl.textContent = totalTrees.toLocaleString();
     speciesEl.textContent = uniqueSpecies.toLocaleString();
-    areaEl.textContent = formatArea(totalArea) || '—';
     crownEl.textContent = averageCrown
         ? formatMeasurement(averageCrown, 'm', { maximumFractionDigits: 2 })
         : '—';
@@ -1435,9 +1680,33 @@ async function loadAndProcessShapefiles() {
         console.log('Geometry types in shapefile:', metadata.geometryTypes);
 
         originalTreeData = geojson.features.map((feature, index) => {
-            const properties = feature.properties;
+            const properties = feature.properties || {};
             const treeId = properties.tree_id || properties.id || properties.FID || `T${(index + 1).toString().padStart(3, '0')}`;
             const speciesField = properties.species || properties.SPECIES || properties.Species || 'Unknown';
+
+            const normaliseNumeric = (value) => {
+                const numeric = typeof value === 'number' ? value : Number(value);
+                return Number.isFinite(numeric) ? numeric : null;
+            };
+
+            const selectFirstNumeric = (keys, source) => {
+                for (const key of keys) {
+                    if (Object.prototype.hasOwnProperty.call(source, key)) {
+                        const numeric = normaliseNumeric(source[key]);
+                        if (numeric !== null && numeric > 0) {
+                            return numeric;
+                        }
+                    }
+                }
+                return null;
+            };
+
+            const planarArea = computePlanarCanopyArea(feature.geometry);
+            const areaValue = selectFirstNumeric(['area', 'Area', 'AREA'], properties);
+            const resolvedArea = planarArea ?? areaValue ?? null;
+            const perimeterValue = selectFirstNumeric(['perimeter', 'perimtr', 'perim', 'Perimeter', 'PERIMTR'], properties);
+            const existingDiameter = selectFirstNumeric(['crown_diameter_m', 'specs_d', 'specis_d', 'crown_width', 'width', 'WIDTH'], properties);
+            const derivedDiameter = existingDiameter ?? deriveCrownDiameterFromArea(resolvedArea);
 
             return {
                 ...feature,
@@ -1446,8 +1715,12 @@ async function loadAndProcessShapefiles() {
                     tree_id: treeId,
                     predicted_species: 'N/A', // Simplified for now
                     ground_truth_species: speciesField,
-                    status: 'Visible' // A single status to ensure it's not filtered out
-                }
+                    status: 'Visible', // A single status to ensure it's not filtered out
+                    area: resolvedArea ?? null,
+                    planar_canopy_area_m2: planarArea ?? null,
+                    perimeter: perimeterValue ?? properties.perimeter ?? properties.perimtr ?? null,
+                    crown_diameter_m: derivedDiameter ?? null,
+                },
             };
         });
 
@@ -1526,34 +1799,62 @@ function addTreesToMap(data = filteredData) {
                 treeLayerIndex.set(treeId, layer);
             }
 
-            let areaSqMeters = null;
+            const toNumeric = (value) => {
+                if (typeof value === 'number') {
+                    return Number.isFinite(value) ? value : null;
+                }
+
+                if (typeof value === 'string') {
+                    const parsed = Number(value);
+                    return Number.isFinite(parsed) ? parsed : null;
+                }
+
+                return null;
+            };
+
+            let areaSqMeters = toNumeric(coalesceProperty(props, ['planar_canopy_area_m2', 'area']));
+
+            let planarArea = null;
             if (feature.geometry && typeof feature.geometry.type === 'string' && feature.geometry.type.includes('Polygon')) {
                 try {
-                    const latLngs = layer.getLatLngs();
-                    if (Array.isArray(latLngs) && latLngs.length > 0) {
-                        const rings = Array.isArray(latLngs[0]) ? latLngs : [latLngs];
-                        const computedArea = rings.reduce((sum, ring) => {
-                            if (!Array.isArray(ring) || ring.length === 0) {
-                                return sum;
-                            }
-
-                            return sum + L.GeometryUtil.geodesicArea(ring);
-                        }, 0);
-
-                        if (Number.isFinite(computedArea) && computedArea > 0) {
-                            areaSqMeters = computedArea;
-                        }
-                    }
+                    planarArea = computePlanarCanopyArea(layer.getLatLngs());
                 } catch (error) {
-                    console.warn('Error calculating area:', error);
+                    console.warn('Error calculating planar canopy area:', error);
                 }
             }
 
-            if (!Number.isFinite(areaSqMeters)) {
-                const areaPropValue = coalesceProperty(props, ['area']);
-                const areaNumeric = Number(areaPropValue);
-                if (Number.isFinite(areaNumeric) && areaNumeric > 0) {
-                    areaSqMeters = areaNumeric;
+            if (planarArea !== null && planarArea > 0) {
+                areaSqMeters = planarArea;
+                props.planar_canopy_area_m2 = planarArea;
+            }
+
+            if ((areaSqMeters === null || areaSqMeters <= 0) && feature.geometry && typeof feature.geometry.type === 'string' && feature.geometry.type.includes('Polygon')) {
+                try {
+                    const computedArea = computeGeodesicFeatureArea(layer.getLatLngs());
+                    if (computedArea !== null && computedArea > 0) {
+                        areaSqMeters = computedArea;
+                    }
+                } catch (error) {
+                    console.warn('Error calculating geodesic area:', error);
+                }
+            }
+
+            if (areaSqMeters !== null && areaSqMeters > 0) {
+                props.area = areaSqMeters;
+            } else {
+                areaSqMeters = null;
+                delete props.area;
+                delete props.planar_canopy_area_m2;
+            }
+
+            const existingDiameter = toNumeric(
+                coalesceProperty(props, ['crown_diameter_m', 'specs_d', 'specis_d', 'crown_width', 'width', 'WIDTH']),
+            );
+
+            if ((existingDiameter === null || existingDiameter <= 0) && areaSqMeters !== null) {
+                const derived = deriveCrownDiameterFromArea(areaSqMeters);
+                if (derived !== null) {
+                    props.crown_diameter_m = derived;
                 }
             }
 
@@ -1569,8 +1870,7 @@ function addTreesToMap(data = filteredData) {
             const speciesDisplay = escapeHtml(species);
             const treeIdDisplay = escapeHtml(treeId ?? 'ID Unknown');
 
-            const areaDisplay = formatArea(areaSqMeters);
-            const crownDiameterRaw = coalesceProperty(props, ['specs_d', 'specis_d', 'crown_width', 'width', 'WIDTH']);
+            const crownDiameterRaw = coalesceProperty(props, ['crown_diameter_m', 'specs_d', 'specis_d', 'crown_width', 'width', 'WIDTH']);
             const crownDiameterDisplay = formatMeasurement(
                 crownDiameterRaw,
                 props.width_unit || props.crown_width_unit || props.diameter_unit || 'm',
@@ -1585,7 +1885,6 @@ function addTreesToMap(data = filteredData) {
 
             const quickFacts = [
                 { label: 'Group', value: groupDisplay },
-                { label: 'Area', value: areaDisplay },
                 { label: 'Perimeter', value: perimeterDisplay },
                 { label: 'Crown Diameter', value: crownDiameterDisplay },
             ].filter((fact) => fact.value);
@@ -1638,12 +1937,12 @@ function addTreesToMap(data = filteredData) {
             const popupBody = [predictionBlock, quickFactsBlock, propertiesBlock].filter(Boolean).join('');
 
             const popupContent = `
-                <div style="min-width: 320px;">
-                    <div style="background-color: ${getSpeciesColor(species, props.tree_id)}; color: white; padding: 10px; margin: -13px -19px 12px -19px; border-radius: 12px 12px 0 0;">
-                        <h4 style="margin: 0; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);">Tree ${treeIdDisplay}</h4>
-                        <div style="font-size: 14px; margin-top: 5px;">${speciesDisplay}</div>
+                <div class="tree-popup" role="presentation">
+                    <div class="tree-popup__header" style="background-color: ${getSpeciesColor(species, props.tree_id)};">
+                        <h4>Tree ${treeIdDisplay}</h4>
+                        <div>${speciesDisplay}</div>
                     </div>
-                    ${popupBody}
+                    <div class="tree-popup__body">${popupBody || ''}</div>
                 </div>
             `;
 
@@ -1716,6 +2015,7 @@ function populateResultsTable() {
             <th data-sort="actual">Actual Species</th>
             <th data-sort="predicted">Predicted Species</th>
             <th data-sort="status">Status</th>
+            <th data-sort="crown_diameter_m">Crown Diameter (m)</th>
         `;
         
         // Show the message in console for debugging
@@ -1726,7 +2026,7 @@ function populateResultsTable() {
             <th data-sort="Cmmn_Nm">Common Name</th>
             <th data-sort="Scntf_N">Scientific Name</th>
             <th data-sort="Family">Family</th>
-            <th data-sort="specs_d">Diameter (cm)</th>
+            <th data-sort="crown_diameter_m">Crown Diameter (m)</th>
         `;
         
         // Show the message in console for debugging
@@ -1736,8 +2036,10 @@ function populateResultsTable() {
     bindSortHeaderEvents();
     updateSortIndicators();
 
+    const columnCount = tableHeaders.querySelectorAll('th').length;
+
     if (filteredData.length === 0) {
-        tableBody.innerHTML = '<tr><td colspan="5">No trees to display.</td></tr>';
+        tableBody.innerHTML = `<tr><td colspan="${columnCount}">No trees to display.</td></tr>`;
         return;
     }
 
@@ -1754,18 +2056,24 @@ function populateResultsTable() {
             const treeData = getPredictionForTree(treeIdStr);
             
             if (treeData) {
+                const props = tree.properties || {};
+                const crownDiameterRaw = coalesceProperty(props, ['crown_diameter_m', 'specs_d', 'specis_d', 'crown_width', 'width', 'WIDTH']);
+                const crownDiameterNumeric = Number(crownDiameterRaw);
+                const crownDiameterDisplay = formatMeasurement(crownDiameterNumeric, 'm', { maximumFractionDigits: 2 }) ?? '—';
+
                 if (treeData.isTraining) {
                     // Display training data differently
                     row.innerHTML = `
-                    <td>${treeId}</td>
-                    <td>${treeData.actual}</td>
-                    <td>N/A</td>
-                    <td>
-                        <span style="color:#FFC107; font-weight:bold;">
-                            TRAINING
-                        </span>
-                    </td>
-                `;
+                        <td>${treeId}</td>
+                        <td>${treeData.actual}</td>
+                        <td>N/A</td>
+                        <td>
+                            <span style="color:#FFC107; font-weight:bold;">
+                                TRAINING
+                            </span>
+                        </td>
+                        <td>${crownDiameterDisplay}</td>
+                    `;
                     
                     // Add training data highlighting
                     row.style.backgroundColor = 'rgba(255, 193, 7, 0.05)';
@@ -1776,15 +2084,16 @@ function populateResultsTable() {
                     console.log(`Table row: Tree ${treeIdStr} found in predictions, status: ${statusText}`);
                     
                     row.innerHTML = `
-                    <td>${treeId}</td>
-                    <td>${treeData.actual}</td>
-                    <td>${treeData.predicted}</td>
-                    <td>
-                        <span style="color:${statusColor}; font-weight:bold;">
-                            ${treeData.correct ? '✓' : '✗'} ${statusText}
-                        </span>
-                    </td>
-                `;
+                        <td>${treeId}</td>
+                        <td>${treeData.actual}</td>
+                        <td>${treeData.predicted}</td>
+                        <td>
+                            <span style="color:${statusColor}; font-weight:bold;">
+                                ${treeData.correct ? '✓' : '✗'} ${statusText}
+                            </span>
+                        </td>
+                        <td>${crownDiameterDisplay}</td>
+                    `;
                     
                     // Add highlighting based on correctness
                     row.style.backgroundColor = treeData.correct ? 'rgba(76, 175, 80, 0.05)' : 'rgba(244, 67, 54, 0.05)';
@@ -1795,7 +2104,9 @@ function populateResultsTable() {
             const commonName = props.Cmmn_Nm || props.cmmn_nm || 'Unknown';
             const scientificName = props.Scntf_N || props.scntf_n || '-';
             const family = props.Family || props.family || '-';
-            const diameter = props.specs_d || props.diameter || '-';
+            const crownDiameterRaw = coalesceProperty(props, ['crown_diameter_m', 'specs_d', 'specis_d', 'crown_width', 'width', 'WIDTH']);
+            const crownDiameterNumeric = Number(crownDiameterRaw);
+            const crownDiameterDisplay = formatMeasurement(crownDiameterNumeric, 'm', { maximumFractionDigits: 2 }) ?? '—';
             const color = getSpeciesColor(commonName);
             
             row.innerHTML = `
@@ -1809,7 +2120,7 @@ function populateResultsTable() {
                 </td>
                 <td><em>${scientificName}</em></td>
                 <td>${family}</td>
-                <td>${diameter}</td>
+                <td>${crownDiameterDisplay}</td>
             `;
         }
         

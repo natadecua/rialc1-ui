@@ -20,7 +20,9 @@ app.use(
       const ext = path.extname(filePath).toLowerCase();
 
       if (ext === '.bin' || ext === '.laz' || ext === '.las') {
-        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        // Range requests for large Potree assets can trip browser cache limitations
+        // when immutable caching is enabled. Prefer no-store so partial fetches succeed.
+        res.setHeader('Cache-Control', 'no-store');
         res.setHeader('Access-Control-Expose-Headers', 'Content-Length');
       } else if (
         ext === '.json' ||

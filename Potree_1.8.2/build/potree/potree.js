@@ -67110,34 +67110,38 @@ void main() {
 				transform = {forward: (v) => v};
 			}
 			
-			if(feature.geometry.type === "Point"){
+			if(feature.geometry.type === "Point" || feature.geometry.type === "PointZ"){
 				let sg = new SphereGeometry(1, 18, 18);
 				let sm = new MeshNormalMaterial();
 				let s = new Mesh(sg, sm);
 				
-				let [long, lat] = geometry.coordinates;
+				let coord = geometry.coordinates;
+				let [long, lat] = coord;
 				let pos = transform.forward([long, lat]);
-				
-				s.position.set(...pos, 20);
+				let z = coord.length > 2 ? coord[2] : 0;
+			
+				s.position.set(pos[0], pos[1], z);
 				
 				s.scale.set(10, 10, 10);
 				
 				return s;
-			}else if(geometry.type === "LineString"){
+			}else if(geometry.type === "LineString" || geometry.type === "LineStringZ"){
 				let coordinates = [];
 				
 				let min = new Vector3(Infinity, Infinity, Infinity);
 				for(let i = 0; i < geometry.coordinates.length; i++){
-					let [long, lat] = geometry.coordinates[i];
+					let coord = geometry.coordinates[i];
+					let [long, lat] = coord;
 					let pos = transform.forward([long, lat]);
-					
+					let z = coord.length > 2 ? coord[2] : 0;
+				
 					min.x = Math.min(min.x, pos[0]);
 					min.y = Math.min(min.y, pos[1]);
-					min.z = Math.min(min.z, 20);
-					
-					coordinates.push(...pos, 20);
+					min.z = Math.min(min.z, z);
+				
+					coordinates.push(pos[0], pos[1], z);
 					if(i > 0 && i < geometry.coordinates.length - 1){
-						coordinates.push(...pos, 20);
+						coordinates.push(pos[0], pos[1], z);
 					}
 				}
 				
@@ -67156,41 +67160,58 @@ void main() {
 				line.position.copy(min);
 				
 				return line;
-			}else if(geometry.type === "Polygon"){
-				for(let pc of geometry.coordinates){
+			}else if(geometry.type === "Polygon" || geometry.type === "PolygonZ" || geometry.type === "MultiPolygon" || geometry.type === "MultiPolygonZ"){
+				const buildRingNode = (ring) => {
+					if(!ring || ring.length === 0){
+						return null;
+					}
 					let coordinates = [];
-					
 					let min = new Vector3(Infinity, Infinity, Infinity);
-					for(let i = 0; i < pc.length; i++){
-						let [long, lat] = pc[i];
+					for(let i = 0; i < ring.length; i++){
+						let coord = ring[i];
+						let [long, lat] = coord;
 						let pos = transform.forward([long, lat]);
-						
+						let z = coord.length > 2 ? coord[2] : 0;
 						min.x = Math.min(min.x, pos[0]);
 						min.y = Math.min(min.y, pos[1]);
-						min.z = Math.min(min.z, 20);
-						
-						coordinates.push(...pos, 20);
-						if(i > 0 && i < pc.length - 1){
-							coordinates.push(...pos, 20);
+						min.z = Math.min(min.z, z);
+						coordinates.push(pos[0], pos[1], z);
+						if(i > 0 && i < ring.length - 1){
+							coordinates.push(pos[0], pos[1], z);
 						}
 					}
-					
 					for(let i = 0; i < coordinates.length; i += 3){
 						coordinates[i+0] -= min.x;
 						coordinates[i+1] -= min.y;
 						coordinates[i+2] -= min.z;
 					}
-
 					const lineGeometry = new LineGeometry();
-					lineGeometry.setPositions( coordinates );
-
-					const line = new Line2( lineGeometry, matLine );
+					lineGeometry.setPositions(coordinates);
+					const line = new Line2(lineGeometry, matLine);
 					line.computeLineDistances();
-					line.scale.set( 1, 1, 1 );
+					line.scale.set(1, 1, 1);
 					line.position.copy(min);
-					
 					return line;
+				};
+				const group = new Object3D();
+				if(geometry.type === "Polygon" || geometry.type === "PolygonZ"){
+					for(const ring of geometry.coordinates){
+						const node = buildRingNode(ring);
+						if(node){
+							group.add(node);
+						}
+					}
+				}else{
+					for(const polygon of geometry.coordinates){
+						for(const ring of polygon){
+							const node = buildRingNode(ring);
+							if(node){
+								group.add(node);
+							}
+						}
+					}
 				}
+				return group.children.length === 1 ? group.children[0] : group;
 			}else {
 				console.log("unhandled feature: ", feature);
 			}

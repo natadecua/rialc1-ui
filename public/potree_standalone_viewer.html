@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="description" content="La Mesa Ecopark - Tree Segmentation Viewer">
+	<meta name="author" content="">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+	<title>La Mesa Ecopark - 3D Viewer</title>
+
+	<link rel="stylesheet" type="text/css" href="/Potree_1.8.2/build/potree/potree.css">
+	<link rel="stylesheet" type="text/css" href="/Potree_1.8.2/libs/jquery-ui/jquery-ui.min.css">
+	<link rel="stylesheet" type="text/css" href="/Potree_1.8.2/libs/openlayers3/ol.css">
+	<link rel="stylesheet" type="text/css" href="/Potree_1.8.2/libs/spectrum/spectrum.css">
+	<link rel="stylesheet" type="text/css" href="/Potree_1.8.2/libs/jstree/themes/mixed/style.css">
+    
+    <style>
+        html, body {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+        
+        #errorMessage {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(255,0,0,0.7);
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+            z-index: 10000;
+        }
+        
+        .loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.7);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+            color: white;
+        }
+        
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #3498db;
+            border-radius: 50%;
+            margin: 0 auto 20px;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        /* Fix for sidebar issues */
+        #potree_sidebar_container {
+            width: 300px; 
+            height: 100%;
+            position: absolute;
+            z-index: 1000;
+            top: 0px;
+            right: 0px;
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
+        
+        /* Force visible sidebar */
+        .potree_container {
+            position: absolute; 
+            width: 100%; 
+            height: 100%; 
+            left: 0px; 
+            top: 0px; 
+            overflow: hidden;
+        }
+        
+        #potree_render_area {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            left: 0px;
+            top: 0px;
+            overflow: hidden;
+        }
+        
+        /* Fix for navigation */
+        .navigation {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            z-index: 1000;
+            background: rgba(255, 255, 255, 0.7);
+            border-radius: 5px;
+            padding: 10px;
+        }
+        
+        .navigation button {
+            padding: 5px 10px;
+            margin: 0 5px;
+            background: #3498db;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        
+        .navigation button:hover {
+            background: #2980b9;
+        }
+        
+        /* Make sure Potree info panel is visible */
+        .potree_info_text {
+            color: white;
+            background-color: rgba(0, 0, 0, 0.6);
+            padding: 10px;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+
+<body>
+	<script src="/Potree_1.8.2/libs/jquery/jquery-3.1.1.min.js"></script>
+	<script src="/Potree_1.8.2/libs/spectrum/spectrum.js"></script>
+	<script src="/Potree_1.8.2/libs/jquery-ui/jquery-ui.min.js"></script>
+	<script src="/Potree_1.8.2/libs/other/BinaryHeap.js"></script>
+	<script src="/Potree_1.8.2/libs/tween/tween.min.js"></script>
+	<script src="/Potree_1.8.2/libs/d3/d3.js"></script>
+	<script src="/Potree_1.8.2/libs/proj4/proj4.js"></script>
+	<script src="/Potree_1.8.2/libs/openlayers3/ol.js"></script>
+	<script src="/Potree_1.8.2/libs/i18next/i18next.js"></script>
+	<script src="/Potree_1.8.2/libs/jstree/jstree.js"></script>
+	<script src="/Potree_1.8.2/build/potree/potree.js"></script>
+	<script src="/Potree_1.8.2/libs/plasio/js/laslaz.js"></script>
+	<script src="/Potree_1.8.2/libs/shapefile/shapefile.js"></script>
+	
+    <div class="potree_container" id="potree_container">
+        <div id="potree_render_area"></div>
+        <div id="potree_sidebar_container"></div>
+    </div>
+    
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="spinner"></div>
+        <div id="loadingProgress" style="margin-top:20px;font-size:18px;">Loading resources...</div>
+    </div>
+    
+    <div class="navigation">
+        <button id="toggleSidebar">Toggle Sidebar</button>
+        <button id="fitToScreen">Fit to Screen</button>
+        <button id="resetView">Reset View</button>
+    </div>
+	
+	<script type="module">
+		import * as THREE from "/Potree_1.8.2/libs/three.js/build/three.module.js";
+	
+        // Show loading progress
+        function updateProgress(text) {
+            document.getElementById('loadingProgress').innerText = text;
+        }
+        
+        function hideLoading() {
+            document.getElementById('loadingOverlay').style.display = 'none';
+        }
+        
+        function showError(message) {
+            const errorDiv = document.createElement('div');
+            errorDiv.id = 'errorMessage';
+            errorDiv.textContent = message;
+            document.body.appendChild(errorDiv);
+            
+            // Auto-hide after 5 seconds
+            setTimeout(() => {
+                if (errorDiv.parentNode) {
+                    errorDiv.parentNode.removeChild(errorDiv);
+                }
+            }, 5000);
+        }
+        
+        // Initialize viewer
+        updateProgress("Initializing viewer...");
+		window.viewer = new Potree.Viewer(document.getElementById("potree_render_area"));
+		
+		viewer.setEDLEnabled(true);
+		viewer.setFOV(60);
+		viewer.setPointBudget(3_000_000);
+		viewer.loadSettingsFromURL();
+		
+		viewer.setDescription('La Mesa Ecopark: Tree Classification Results');
+		
+		viewer.loadGUI(() => {
+			viewer.setLanguage('en');
+			$("#menu_tools").next().show();
+			$("#menu_scene").next().show();
+			// Make sure sidebar is visible - important!
+            setTimeout(() => {
+                const sidebar = document.getElementById("potree_sidebar_container");
+                if (sidebar) {
+                    sidebar.style.display = "block";
+                    sidebar.style.overflow = "auto";
+                }
+                
+                // Force sidebar toggle to make sure it's visible
+                if (viewer.toggleSidebar) {
+                    viewer.toggleSidebar();
+                    // Toggle twice if it's still not visible
+                    setTimeout(() => {
+                        if (sidebar && getComputedStyle(sidebar).display === "none") {
+                            viewer.toggleSidebar();
+                        }
+                    }, 100);
+                }
+            }, 500);
+		});
+		
+        // Define coordinate projections for the Philippines
+        proj4.defs("PRS92_ZONE3", "+proj=tmerc +lat_0=0 +lon_0=121 +k=0.99995 +x_0=500000 +y_0=0 +a=6378206.4 +b=6356583.799999996 +units=m +no_defs");
+        proj4.defs("WGS84", "+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs");
+        proj4.defs("pointcloud", "+proj=tmerc +lat_0=0 +lon_0=121 +k=0.99995 +x_0=500000 +y_0=0 +a=6378206.4 +b=6356583.799999996 +units=m +no_defs");
+        
+        // Load the point cloud
+        updateProgress("Loading point cloud...");
+		Potree.loadPointCloud(
+            "/raw_data/modified_merged_converted/metadata.json",
+            "La Mesa Forest", 
+            async e => {
+			// Clear loading once point cloud is ready
+            updateProgress("Rendering point cloud...");
+            
+			let scene = viewer.scene;
+			let pointcloud = e.pointcloud;
+			let material = pointcloud.material;
+			scene.addPointCloud(pointcloud);
+			
+			material.pointSizeType = Potree.PointSizeType.ADAPTIVE;
+			material.size = 1.0;
+            
+            // Try to use appropriate attribute for coloring
+            if (material.attributes && material.attributes.rgba) {
+                material.activeAttributeName = "rgba";
+            } else if (material.attributes && material.attributes.rgb) {
+                material.activeAttributeName = "rgb";
+            } else {
+                material.activeAttributeName = "intensity";
+            }
+            
+            console.log("Available attributes:", Object.keys(material.attributes || {}));
+            console.log("Using attribute:", material.activeAttributeName);
+            
+			// Get the bounding box center for positioning the camera
+			const bbox = pointcloud.boundingBox;
+			const center = new THREE.Vector3(
+				(bbox.min.x + bbox.max.x) / 2,
+				(bbox.min.y + bbox.max.y) / 2,
+				(bbox.min.z + bbox.max.z) / 2
+			);
+            
+            const extent = new THREE.Vector3(
+                bbox.max.x - bbox.min.x,
+                bbox.max.y - bbox.min.y,
+                bbox.max.z - bbox.min.z
+            );
+            
+            // Position camera at a reasonable distance and angle
+            const distance = Math.max(extent.length() * 0.3, 100);
+            
+            scene.view.position.set(
+                center.x - distance * 0.3,  
+                center.y - distance * 0.3,
+                center.z + distance * 0.5
+            );
+            
+			scene.view.lookAt(center);
+			
+            // Save initial camera position for reset
+            window.initialCameraPosition = {
+                position: scene.view.position.clone(),
+                target: center.clone()
+            };
+            
+            updateProgress("Loading shapefile overlays...");
+            
+			// Load shapefile overlays with proper Z handling
+			try {
+				const loader = new Potree.ShapefileLoader();
+                // Using identity transform since both are in same coordinate system
+				loader.transform = coord => coord;
+
+				// Group all shapefile layers together
+				const crownGroupsNode = new THREE.Object3D();
+				crownGroupsNode.name = "Tree Taxonomic Groups";
+				viewer.scene.scene.add(crownGroupsNode);
+                
+                // Ensure zOffset is properly applied to all shapefiles
+                const zOffset = 3; // Adjust as needed to make sure crowns are visible above point cloud
+                
+                // Define shapefile groups with different colors
+                const groups = [
+                    { id: 1, name: "Species Group 1", color: new THREE.Color(0.1, 0.8, 0.1) },  // Green
+                    { id: 2, name: "Species Group 2", color: new THREE.Color(0.8, 0.1, 0.1) },  // Red
+                    { id: 3, name: "Species Group 3", color: new THREE.Color(0.1, 0.1, 0.8) },  // Blue
+                    { id: 4, name: "Species Group 4", color: new THREE.Color(0.8, 0.8, 0.1) },  // Yellow
+                    { id: 5, name: "Species Group 5", color: new THREE.Color(0.8, 0.1, 0.8) }   // Purple
+                ];
+                
+                // Create a node for each group
+                const groupNodes = groups.map(group => {
+                    const node = new THREE.Object3D();
+                    node.name = group.name;
+                    crownGroupsNode.add(node);
+                    return { ...group, node };
+                });
+                
+                // Load shapefile
+                try {
+                    const shapefile = await loader.load("/raw_data/shapefiles/crowns_shape2.shp");
+                    
+                    if (shapefile && shapefile.node) {
+                        // Process all children of the shapefile
+                        shapefile.node.traverse(node => {
+                            if (node.material) {
+                                // Important! This makes the shapefiles visible above the point cloud
+                                node.material.depthTest = false;
+                                node.material.depthWrite = false;
+                                node.material.transparent = true;
+                                node.material.opacity = 0.7;
+                                node.material.side = THREE.DoubleSide;
+                                node.material.polygonOffset = true;
+                                node.material.polygonOffsetFactor = -1;
+                                node.material.polygonOffsetUnits = -1;
+                                node.renderOrder = 1000; // Higher renderOrder = rendered later (on top)
+                                
+                                // Add elevation to ensure visibility
+                                if (node.position) {
+                                    node.position.z += zOffset;
+                                }
+                                
+                                // Assign random group color
+                                const randomGroup = groups[Math.floor(Math.random() * groups.length)];
+                                node.material.color.copy(randomGroup.color);
+                            }
+                        });
+                        
+                        // Add to scene
+                        crownGroupsNode.add(shapefile.node);
+                        
+                        // Keep shapefile resolution in sync with renderer
+                        viewer.addEventListener("update", () => {
+                            const size = viewer.renderer.getSize(new THREE.Vector2());
+                            if (shapefile && shapefile.setResolution) {
+                                shapefile.setResolution(size.width, size.height);
+                            }
+                        });
+                    }
+                } catch (shapefileError) {
+                    console.error("Error loading shapefile:", shapefileError);
+                    showError("Shapefile loading error: " + shapefileError.message);
+                }
+                
+				// Add groups to scene tree for toggling visibility
+				viewer.onGUILoaded(() => {
+					let tree = $(`#jstree_scene`);
+					let parentNode = "other";
+					
+                    // Add main group
+					let crownGroupsID = tree.jstree('create_node', parentNode, { 
+						"text": "Tree Crown Groups", 
+						"icon": `${Potree.resourcePath}/icons/triangle.svg`,
+						"object": crownGroupsNode,
+						"data": crownGroupsNode,
+					}, "last", false, false);
+                    
+                    // Make sure node is checked (visible)
+                    tree.jstree("check_node", crownGroupsID);
+				});
+                
+			} catch (error) {
+				console.error("Error in shapefile loading:", error);
+				showError("Failed to load shapefiles: " + error.message);
+			}
+            
+            // Hide loading overlay when everything is ready
+            hideLoading();
+		},
+        // Progress callback
+        xhr => {
+            if (xhr.total) {
+                const progress = Math.round((xhr.loaded / xhr.total * 100));
+                updateProgress(`Loading point cloud: ${progress}%`);
+            }
+        },
+        // Error callback
+        error => {
+            console.error("Error loading point cloud:", error);
+            updateProgress("Failed to load point cloud: " + error.message);
+            showError("Point cloud loading error: " + error.message);
+        });
+        
+        // Set up UI event handlers
+        document.getElementById('toggleSidebar').addEventListener('click', () => {
+            if (viewer && viewer.toggleSidebar) {
+                viewer.toggleSidebar();
+            }
+        });
+        
+        document.getElementById('fitToScreen').addEventListener('click', () => {
+            if (viewer) {
+                viewer.fitToScreen();
+            }
+        });
+        
+        document.getElementById('resetView').addEventListener('click', () => {
+            if (viewer && window.initialCameraPosition) {
+                viewer.scene.view.position.copy(window.initialCameraPosition.position);
+                viewer.scene.view.lookAt(window.initialCameraPosition.target);
+            }
+        });
+	</script>
+</body>
+</html>

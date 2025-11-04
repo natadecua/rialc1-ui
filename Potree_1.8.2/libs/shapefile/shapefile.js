@@ -255,6 +255,38 @@ var readPolygon = function(record) {
       : {type: "MultiPolygon", coordinates: polygons};
 };
 
+var readPolygonZ = function(record) {
+  var i = 44, j, n = record.getInt32(36, true), m = record.getInt32(40, true), parts = new Array(n), points = new Array(m), polygons = [], holes = [];
+  for (j = 0; j < n; ++j, i += 4) parts[j] = record.getInt32(i, true);
+  for (j = 0; j < m; ++j, i += 16) points[j] = [record.getFloat64(i, true), record.getFloat64(i + 8, true)];
+
+  // skip Z min/max
+  if (m > 0) {
+    i += 16;
+    for (j = 0; j < m; ++j, i += 8) points[j].push(record.getFloat64(i, true));
+  }
+
+  parts.forEach(function(i, j) {
+    var end = parts[j + 1] === undefined ? points.length : parts[j + 1];
+    var ring = points.slice(i, end);
+    if (ringClockwise(ring)) polygons.push([ring]);
+    else holes.push(ring);
+  });
+
+  holes.forEach(function(hole) {
+    polygons.some(function(polygon) {
+      if (ringContainsSome(polygon[0], hole)) {
+        polygon.push(hole);
+        return true;
+      }
+    }) || polygons.push([hole]);
+  });
+
+  return polygons.length === 1
+      ? {type: "Polygon", coordinates: polygons[0]}
+      : {type: "MultiPolygon", coordinates: polygons};
+};
+
 function ringClockwise(ring) {
   if ((n = ring.length) < 4) return false;
   var i = 0, n, area = ring[n - 1][1] * ring[0][0] - ring[n - 1][0] * ring[0][1];
@@ -337,7 +369,7 @@ var types$1 = {
   8: readMultiPoint,
   11: readPoint,
   13: readPolyLineZ,
-  15: readPolygon,
+  15: readPolygonZ,
   18: readMultiPoint
 };
 

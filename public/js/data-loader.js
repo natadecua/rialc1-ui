@@ -158,6 +158,12 @@ export function summariseTreeDataset(features) {
 
     speciesCounts[species] = (speciesCounts[species] || 0) + 1;
 
+    const areaProp = Number(props.area);
+    if (Number.isFinite(areaProp) && areaProp > 0) {
+      totalArea += areaProp;
+      return;
+    }
+
     if (feature.geometry?.type?.includes('Polygon')) {
       try {
         const layer = L.geoJSON(feature);

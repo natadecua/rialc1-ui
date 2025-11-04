@@ -38,10 +38,10 @@ const FALLBACK_GROUP = { id: 0, name: 'Group 0 · Unclassified', color: '#94a3b8
 
 const SHAPEFILE_CANDIDATES = [
   '/raw_data/shapefiles/mcws_crowns_newclass.shp',
-  '/raw_data/crown_shp/mcws_crowns.shp'
+  //'/raw_data/crown_shp/mcws_crowns.shp'
 ];
 
-const POINTCLOUD_METADATA_URL = '/raw_data/modified_merged_converted/metadata.json';
+const POINTCLOUD_METADATA_URL = '/raw_data/merged_recropped/metadata.json';
 
 const potreeState = {
   viewer: null,
@@ -336,26 +336,27 @@ function prepareProjections() {
     proj4.defs('EPSG:3123', '+proj=tmerc +lat_0=0 +lon_0=121 +k=0.99995 +x_0=500000 +y_0=0 +ellps=clrk66 +towgs84=-127.62,-67.24,-47.04,-3.068,4.903,1.578,-1.06 +units=m +no_defs');
   }
 
-  // Define pointcloud projection - using UTM Zone 51N for Philippines (matches view_lamesa.html)
+  // Use EPSG:3123 for pointcloud as well since that's what the data uses
   if (!proj4.defs('pointcloud')) {
-    proj4.defs('pointcloud', '+proj=utm +zone=51 +datum=WGS84 +units=m +no_defs');
+    proj4.defs('pointcloud', '+proj=tmerc +lat_0=0 +lon_0=121 +k=0.99995 +x_0=500000 +y_0=0 +ellps=clrk66 +towgs84=-127.62,-67.24,-47.04,-3.068,4.903,1.578,-1.06 +units=m +no_defs');
   }
 }
 
 function createLineMaterial(color, viewer) {
   const lineMaterial = new LineMaterial({
     color: new THREE.Color(color),
-    linewidth: 3.0, // Increased from 2.4 for better visibility
+    linewidth: 4.0, // Increased for better visibility
     transparent: true,
-    opacity: 0.95, // Increased from 0.85 for better visibility
+    opacity: 1.0, // Full opacity for better visibility
   });
 
   const size = viewer.renderer.getSize(new THREE.Vector2());
   lineMaterial.resolution.set(size.width, size.height);
-  lineMaterial.depthTest = true; // Changed from false - proper depth testing
+  lineMaterial.depthTest = true;
+  lineMaterial.depthWrite = false; // Don't write to depth buffer to prevent z-fighting
   lineMaterial.polygonOffset = true;
-  lineMaterial.polygonOffsetFactor = -2; // Changed from -1 for better layering
-  lineMaterial.polygonOffsetUnits = -2; // Changed from 1
+  lineMaterial.polygonOffsetFactor = -4; // More aggressive offset for better layering
+  lineMaterial.polygonOffsetUnits = -4;
 
   return lineMaterial;
 }
@@ -364,9 +365,8 @@ async function loadTreeCrownOverlays(viewer, pointcloud, heightHints = {}) {
   prepareProjections();
 
   const loader = new Potree.ShapefileLoader();
-  // Transform from EPSG:3123 (shapefile) to UTM Zone 51N (pointcloud)
-  const shapefileToPointcloud = proj4('EPSG:3123', 'pointcloud');
-  loader.transform = shapefileToPointcloud;
+  // Both shapefile and pointcloud use EPSG:3123, so use identity transform
+  loader.transform = (coords) => coords; // Identity transform - no conversion needed
 
   let features = null;
   let selectedPath = null;
@@ -420,14 +420,13 @@ async function loadTreeCrownOverlays(viewer, pointcloud, heightHints = {}) {
   const spacing = Math.max(pointcloud?.pcoGeometry?.spacing ?? 1, 0.5);
 
   const hoverAmplitude = Math.min(
-    Math.max(spacing * 0.25, 0.35),
-    canopyHeight * 0.1 || 1.5
+    Math.max(spacing * 0.5, 0.5),
+    canopyHeight * 0.05 || 1.0
   );
-  const hoverSpeed = 0.6;
+  const hoverSpeed = 0.4;
 
-  // Place crown base height above the canopy top so they're visible
-  // Add some spacing above the canopy to ensure shapefiles are visible
-  let crownBaseHeight = canopyTop + spacing * 2; // Elevated above the point cloud
+  // Place crowns at approximately the canopy top with slight offset
+  let crownBaseHeight = canopyTop + (spacing * 0.5);
   
   console.log('[Potree] Height settings:', {
     canopyTop,
@@ -435,7 +434,11 @@ async function loadTreeCrownOverlays(viewer, pointcloud, heightHints = {}) {
     canopyHeight,
     crownBaseHeight,
     spacing,
-    hoverAmplitude
+    hoverAmplitude,
+    datasetBounds: datasetBounds ? {
+      min: datasetBounds.min.toArray(),
+      max: datasetBounds.max.toArray()
+    } : null
   });
 
   const groups = [...GROUP_DEFINITIONS, FALLBACK_GROUP].map((group) => {
@@ -574,7 +577,22 @@ async function initializePotreeViewer() {
       viewer.setLanguage('en');
       $('#menu_tools').next().show();
       $('#menu_scene').next().show();
-      viewer.toggleSidebar(); // Toggle to show the sidebar
+      
+      // Make sure sidebar is visible
+      const sidebar = viewer.sidebar ?? document.getElementById('potree_sidebar_container');
+      if (sidebar) {
+        if (sidebar.style) {
+          sidebar.style.display = 'block';
+        }
+        if (sidebar.classList) {
+          sidebar.classList.remove('hidden');
+        }
+      }
+      
+      // Show the sidebar if it's hidden by default
+      if (viewer.toggleSidebar && viewer.sidebar && viewer.sidebar.style.display === 'none') {
+        viewer.toggleSidebar();
+      }
     });
 
     const pointCloudPromise = new Promise((resolve, reject) => {

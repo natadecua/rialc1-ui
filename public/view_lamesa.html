@@ -71,7 +71,13 @@
 			scene.addPointCloud(pointcloud);
 			
 			material.pointSizeType = Potree.PointSizeType.ADAPTIVE;
-			material.size = 1.0;
+			material.size = 0.45; // Smaller points to reduce coverage over linework
+			material.minSize = 0.25;
+			material.shape = Potree.PointShape.CIRCLE;
+			material.opacity = 0.15; // Stronger transparency so line overlays stay visible by default
+			material.updateShaderSource();
+			pointcloud.visiblePointsTarget = 900_000; // Reduce density for clarity
+			viewer.setPointBudget(1_000_000);
             material.activeAttributeName = "rgba"; // Or "rgba" if you have color
 			
             // ================================================================================
@@ -95,33 +101,12 @@
 
 				const loader = new Potree.ShapefileLoader();
 				loader.transform = transform;
-				const crownsPath = "/raw_data/shapefiles/mcws_crowns_newclass.shp";
 
 				// Group all shapefile layers together for easier toggling
 				const segmentationNode = new THREE.Object3D();
 				segmentationNode.name = "Segmentation Results";
 				viewer.scene.scene.add(segmentationNode);
 
-				// Load the tree crown polygons shapefile and apply styling
-				const crowns = await loader.load(encodeURI(crownsPath));
-				segmentationNode.add(crowns.node);
-
-				crowns.node.traverse(node => {
-					if (node.isMesh || node.isLine) {
-						node.renderOrder = 999;
-					}
-					if (node.material) {
-						node.material.color.setRGB(0.05, 0.75, 0.3);
-						node.material.opacity = 0.45;
-						node.material.transparent = true;
-						node.material.depthTest = false;
-						node.material.depthWrite = false;
-						node.material.polygonOffset = true;
-						node.material.polygonOffsetFactor = -1;
-						node.material.polygonOffsetUnits = -4;
-					}
-				});
-                
                 // Load the lines shapefile and apply styling
                 const linesPath = "/raw_data/shapefiles/lines_new.shp";
                 let lines = null;
@@ -155,9 +140,6 @@
 				// Keep line/polygon resolution in sync with the renderer size
 				viewer.addEventListener("update", () => {
 					const size = viewer.renderer.getSize(new THREE.Vector2());
-					if (crowns && crowns.setResolution) {
-						crowns.setResolution(size.width, size.height);
-					}
                     if (lines && lines.setResolution) {
                         lines.setResolution(size.width, size.height);
                     }
@@ -168,8 +150,6 @@
 					const tree = $("#jstree_scene");
 					const parentNode = "other";
 
-			
-                    
                     if (lines) {
 						const linesID = tree.jstree("create_node", parentNode, {
 							"text": "Tree Lines",

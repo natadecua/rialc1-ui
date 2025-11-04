@@ -282,28 +282,19 @@ function addTreesToMap() {
 }
 
 /**
- * Open the Potree 3D tree viewer modal
+ * Open the Potree 3D tree viewer modal - now uses standalone viewer in a new tab
  */
 function openTreeModal(treeFeature) {
-    const modal = document.getElementById('treeModal');
-    const modalTitle = document.getElementById('modalTitle');
-    const treeInfo = document.getElementById('treeInfo');
-    const potreeContainer = document.getElementById('potreeContainer');
-
-    modalTitle.textContent = `Tree Details: ID ${treeFeature.properties.tree_id}`;
-    treeInfo.innerHTML = `
-        <p><strong>Predicted Species:</strong> ${treeFeature.properties.predicted_species}</p>
-        <p><strong>Ground Truth Species:</strong> ${treeFeature.properties.ground_truth_species}</p>
-        <p><strong>Status:</strong> <span class="status-badge ${treeFeature.properties.status.toLowerCase()}">${treeFeature.properties.status}</span></p>
-    `;
-
-    modal.style.display = 'block';
-
-    // IMPORTANT: Defer viewer initialization until the next render frame.
-    // This ensures the container is visible and has dimensions before Potree tries to render.
-    requestAnimationFrame(() => {
-        initializePotreeViewer(potreeContainer, treeFeature);
-    });
+    // Use the global function from potree-launcher.js to open the standalone viewer
+    if (window.openPotreeViewer) {
+        // Pass tree feature data to standalone viewer
+        window.openPotreeViewer(treeFeature.properties.tree_id, treeFeature);
+    } else {
+        // Fallback if launcher script is not loaded
+        const treeId = treeFeature.properties.tree_id;
+        const url = `/view_lamesa.html?treeId=${encodeURIComponent(treeId)}`;
+        window.open(url, '_blank', 'noopener');
+    }
 }
 
 /**
