@@ -4,41 +4,28 @@ A thesis UI design for LiDAR tree species identification using interactive 2D ma
 
 ## Overview
 
-This web application visualizes tree species identification results using both 2D interactive maps and 3D point cloud visualization. The 2D interface allows exploration of tree crown polygons with classification data, while the 3D interface (powered by Potree) provides detailed point cloud analysis with classification-based coloring, measurement tools, clipping volumes, and 3D tree markers.
+This web application visualizes tree species identification results using 2D interactive maps with per-tree WebGL point cloud visualization. The 2D interface allows exploration of tree crown polygons with classification data, while the point cloud viewer provides detailed intensity-colored 3D visualization with legends and scale indicators.
 
-## Potree Integration Workflow
+## Data Preparation Workflow
 
-### 1. Inspect and Prepare (using QGIS)
-- Load your raw LAS file and shapefiles into QGIS
-- Use QGIS 3D View to quickly inspect your data
-- Ensure coordinate systems match between datasets
-- Export shapefiles as GeoJSON files for web compatibility
+### 1. Prepare Point Cloud Data
+- Place your LiDAR CSV file (with tree_id, X, Y, Z, Intensity columns) in `raw_data/`
+- Update `server.js` to reference your CSV filename
+- Run the cache builder: `node scripts/build-tree-point-samples.js`
+- This creates an optimized NDJSON sample cache for fast per-tree loading
 
-### 2. Process and Convert (using PotreeConverter)
-- Download PotreeConverter from: https://github.com/potree/PotreeConverter/releases
-- Convert your LAS file to optimized Potree format:
-  ```bash
-  ./PotreeConverter.exe input.las -o output_directory
-  ```
-- This creates an optimized octree structure for high-performance visualization
-
-### 3. Build Your Viewer (using this UI)
-- Load the converted Potree data using the "🌲 Load Potree Point Cloud" button
-- Load your GeoJSON plot boundaries from shapefiles
-- View tree identification results with 3D markers directly on the point cloud
-- Use Potree's built-in tools for analysis:
-  - **Classification coloring**: Distinguish trees from ground and buildings
-  - **Measurement tools**: Measure distances and heights
-  - **Clipping volumes**: Focus on specific areas
-  - **3D tree markers**: Show model predictions at exact locations
+### 2. Prepare Shapefile Data
+- Export tree crown polygons as GeoJSON
+- Place in `raw_data/shapefiles/`
+- Ensure properties include `tree_id`, species, and prediction fields
 
 ## Features
 
-- **High-Performance Visualization**: Potree handles massive point clouds efficiently
-- **Industry Standard**: Widely used in forestry, geology, and infrastructure projects
-- **Tree Detection Overlay**: 3D markers show where your model identified trees
-- **Analysis Tools**: Built-in measurement and clipping capabilities
-- **Shapefile Integration**: Load plot boundaries as overlays
+- **WebGL Point Cloud Viewer**: Per-tree 3D visualization with intensity coloring
+- **Interactive Overlays**: Color legend, scale bar, and grid helper for context
+- **Map Integration**: Leaflet-based 2D map with tree crown polygons
+- **Species Classification**: Toggle between species and prediction coloring
+- **Efficient Streaming**: Reservoir-sampled point clouds via NDJSON cache
 - **Model Evaluation**: Visual comparison of predictions vs ground truth
 
 ## Getting Started
@@ -70,8 +57,9 @@ This web application visualizes tree species identification results using both 2
 
 5. Main features:
    - Use the 2D map interface to explore tree crown polygons and classification results
-   - Click "View 3D Model" or "View Direct 3D Viewer" for 3D point cloud visualization
-   - Analyze tree identification results in both 2D and 3D
+   - Click "View YZ Point Cloud" to open the WebGL 3D viewer for individual trees
+   - Toggle between species and prediction coloring on the map
+   - Analyze tree identification results with interactive overlays
 
 ## Project Structure
 
@@ -81,25 +69,39 @@ rialc1-ui/
 │   ├── index.html           # Main 2D map application HTML
 │   ├── script.js            # Main JavaScript for the 2D application
 │   ├── style.css            # CSS for the application
-│   ├── lamesa_3d_viewer.html    # 3D LiDAR viewer (embedded version)
-│   └── lamesa_potree_viewer.html # Direct 3D LiDAR viewer
+│   ├── js/
+│   │   ├── pointcloud-viewer.js  # WebGL point cloud modal viewer
+│   │   └── tree-point-webgl.js   # Standalone point cloud page
+│   ├── lamesa_3d_viewer.html    # 3D Potree viewer (embedded)
+│   ├── lamesa_potree_viewer.html # Direct 3D Potree viewer
+│   └── view_lamesa.html     # Full Potree viewer page
 ├── lamesa_forest_final_fixed/ # Map tiles for the web application
-├── raw_data/                # Source data including shapefiles, TIFFs, LAS files
-│   ├── crown_shp/           # Tree crown shapefiles
-│   ├── lamesa_processed.las # Sample LAS file
-│   └── prediction_results_top5.csv # Model prediction results for top 5 species
-├── Potree_1.8.2/            # Potree library for 3D point cloud rendering
-├── server.js                # Node.js/Express server
-└── TILE_MANAGEMENT.md       # Documentation for tile generation and management
+├── raw_data/                # Source data
+│   ├── shapefiles/          # Tree crown GeoJSON files
+│   ├── newgroups_adjusted_all_v3.csv # LiDAR point cloud source (gitignored)
+│   ├── tree_point_samples.json # Cached point samples (gitignored)
+│   └── prediction_results_top5.csv # Model predictions
+├── scripts/
+│   └── build-tree-point-samples.js # Cache builder for point clouds
+├── Potree_1.8.2/            # Potree library for legacy 3D viewer
+├── server.js                # Node.js/Express backend
+└── README.md                # This file
 
-## Why Potree?
+## API Endpoints
 
-Potree is the best choice for thesis work on tree identification because:
+- `GET /` - Main application
+- `GET /api/trees/:id/pointcloud?limit=N` - Fetch point cloud samples for a tree
+- Static routes for map tiles, shapefiles, and Potree assets
 
-1. **Focused on Point Clouds**: Built specifically for LiDAR data analysis
-2. **Perfect for Tree Analysis**: Classification-based coloring highlights vegetation
-3. **Industry Standard**: Well-documented with extensive academic usage
-4. **Handles Everything**: Supports shapefiles, measurements, and custom markers
-5. **Performance**: Efficiently renders massive datasets in real-time
+## Development
 
-This keeps your project focused within a single, specialized ecosystem designed for exactly this type of forestry analysis.
+```bash
+# Build point cloud cache after updating CSV
+node scripts/build-tree-point-samples.js
+
+# Run linter
+npm run lint
+
+# Start server
+npm start
+```
