@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node server.js",
     "lint": "eslint \"{public,scripts,server.js}\" --ext .js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build:pointcloud-cache": "node scripts/build-tree-point-samples.js"
   },
   "keywords": [
     "gis",
@@ -18,8 +19,10 @@
   "license": "ISC",
   "dependencies": {
     "cors": "^2.8.5",
+    "csv-parser": "^3.0.0",
     "express": "^4.19.2",
-    "shapefile": "^0.6.6"
+    "shapefile": "^0.6.6",
+    "three": "^0.181.1"
   },
   "devDependencies": {
     "eslint": "^8.57.0",

@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Tree Point Cloud WebGL Viewer</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="style.css" />
+    <style>
+      body {
+        margin: 0;
+        background: #0f172a;
+        color: #f8fafc;
+        font-family:
+          'Inter',
+          system-ui,
+          -apple-system,
+          BlinkMacSystemFont,
+          'Segoe UI',
+          sans-serif;
+        display: flex;
+        flex-direction: column;
+        min-height: 100vh;
+      }
+      header {
+        padding: 16px 24px;
+        background: rgba(15, 23, 42, 0.85);
+        backdrop-filter: blur(12px);
+        border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+      }
+      header h1 {
+        margin: 0;
+        font-size: 1.5rem;
+      }
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: center;
+        margin-top: 12px;
+      }
+      .controls label {
+        font-size: 0.95rem;
+        color: #cbd5f5;
+      }
+      .controls input {
+        border-radius: 6px;
+        border: 1px solid rgba(148, 163, 184, 0.35);
+        padding: 6px 10px;
+        background: rgba(15, 23, 42, 0.6);
+        color: #f8fafc;
+        width: 110px;
+      }
+      .controls button {
+        background: linear-gradient(135deg, #2563eb, #0ea5e9);
+        border: none;
+        border-radius: 6px;
+        padding: 8px 16px;
+        color: #fff;
+        font-weight: 600;
+        cursor: pointer;
+        box-shadow: 0 10px 25px rgba(14, 165, 233, 0.25);
+        transition:
+          transform 0.15s ease,
+          box-shadow 0.15s ease;
+      }
+      .controls button:hover,
+      .controls button:focus-visible {
+        transform: translateY(-1px);
+        box-shadow: 0 14px 30px rgba(14, 165, 233, 0.35);
+      }
+      .viewer-wrapper {
+        flex: 1;
+        position: relative;
+      }
+      #viewerCanvas {
+        width: 100%;
+        height: 100%;
+        display: block;
+      }
+      .status-panel {
+        position: absolute;
+        left: 20px;
+        bottom: 20px;
+        background: rgba(15, 23, 42, 0.78);
+        border-radius: 12px;
+        padding: 16px;
+        max-width: 320px;
+        border: 1px solid rgba(148, 163, 184, 0.25);
+        box-shadow: 0 18px 36px rgba(15, 23, 42, 0.35);
+      }
+      .status-panel h2 {
+        margin: 0 0 8px;
+        font-size: 1rem;
+        color: #38bdf8;
+      }
+      .status-panel p {
+        margin: 0;
+        font-size: 0.9rem;
+        line-height: 1.5;
+        color: #cbd5f5;
+      }
+      .status-panel p strong {
+        color: #f8fafc;
+      }
+    </style>
+    <script type="importmap">{"imports":{"three":"/vendor/three/three.module.js","three/examples/jsm/":"/vendor/three/examples/jsm/"}}</script>
+  </head>
+  <body>
+    <header>
+      <h1>Tree Point Cloud WebGL Viewer</h1>
+      <div class="controls">
+        <label for="treeIdInput">Tree ID</label>
+        <input id="treeIdInput" type="number" min="1" step="1" placeholder="e.g. 42" />
+        <button id="loadBtn" type="button">Load Tree</button>
+        <button id="resetBtn" type="button">Reset View</button>
+      </div>
+    </header>
+    <div class="viewer-wrapper">
+      <canvas id="viewerCanvas" aria-label="Tree point cloud canvas"></canvas>
+      <aside class="status-panel" id="statusPanel">
+        <h2>Status</h2>
+        <p id="statusMessage">Enter a tree ID and click Load Tree to render the point cloud.</p>
+      </aside>
+    </div>
+
+    <script type="module" src="./js/tree-point-webgl.js"></script>
+    <script type="importmap">
+      {
+          <script type="module" src="./js/tree-point-webgl.js"></script>
+          "three": "/vendor/three/three.module.js",
+          "three/examples/jsm/": "/vendor/three/examples/jsm/"
+        }
+      }
+    </script>
+  </body>
+</html>

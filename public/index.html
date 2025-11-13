@@ -29,7 +29,6 @@
     <header class="header" role="banner">
         <h1>La Mesa Ecopark: LiDAR Tree Species Identification</h1>
         <div class="header-links">
-            <a href="/view_lamesa.html" class="view-3d-btn open-3d-viewer" target="_blank" rel="noopener" title="Open the LiDAR point cloud viewer in a new tab">View 3D Model</a>
             <a href="/view_lamesa.html" id="openPotreeBtn" class="view-3d-btn view-3d-btn--secondary open-3d-viewer" target="_blank" rel="noopener" title="Open the inline 3D viewer with tree crowns and overlays">Open 3D Tree Viewer</a>
         </div>
     </header>
@@ -127,11 +126,11 @@
                         </div>
                         <div class="metric">
                             <span class="metric-label">F1 Score</span>
-                            <span class="metric-value" id="modelF1Score">-</span>
+                            <span class="metric-value">85.73%</span>
                         </div>
                         <div class="metric">
                             <span class="metric-label">Cohen's Kappa</span>
-                            <span class="metric-value" id="modelKappa">-</span>
+                            <span class="metric-value">0.8157</span>
                         </div>
                     </div>
                 </section>
@@ -169,13 +168,17 @@
                 </section>
 
                 <!-- File Loading Section -->
-                <section class="file-loading-section">
+                 
+
+                <section class="file-loading-section" style="visibility: hidden;">
                     <h3>Load Data</h3>
                     <button id="loadLocalShapefileBtn" class="load-btn">
                         📁 Load Local Shapefiles
                     </button>
                     <!-- The GeoTIFF button is now removed as it's handled by the backend -->
                 </section>
+            
+
 
                 <!-- Results Section -->
                 <section class="results-section" aria-live="polite">
@@ -210,7 +213,7 @@
                     </div>
                 </section>
 
-                <section class="analysis-section">
+                <section class="analysis-section" style="visibility: collapse;">
                     <h3>Per-Class Metrics</h3>
                     <div id="perClassMetrics" class="pcm-container">
                         <!-- Per-class metrics will be populated by JavaScript -->
@@ -272,6 +275,32 @@
         </div>
     </div>
 
+    <!-- Point Cloud Viewer Modal -->
+    <div id="pointCloudModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="pointCloudModalTitle" aria-describedby="pointCloudStatus" tabindex="-1" aria-hidden="true">
+        <div class="modal-content pointcloud-modal" role="document">
+            <header class="modal-header">
+                <h2 id="pointCloudModalTitle">Tree Point Cloud</h2>
+                <button type="button" id="pointCloudCloseBtn" class="modal-close" aria-label="Close point cloud viewer">&times;</button>
+            </header>
+            <div class="modal-body">
+                <div id="pointCloudViewer" class="pointcloud-viewer" role="presentation">
+                    <canvas id="pointCloudCanvas" class="pointcloud-canvas" aria-hidden="true"></canvas>
+                    <div id="pointCloudStatus" class="pointcloud-status" role="status" aria-live="polite">Select a tree to view its 3D point cloud.</div>
+                </div>
+            </div>
+            <footer class="modal-footer">
+                <button id="pointCloudDismissBtn" class="modal-primary-btn" type="button">Close</button>
+            </footer>
+        </div>
+    </div>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "/vendor/three/three.module.js",
+                "three/examples/jsm/": "/vendor/three/examples/jsm/"
+            }
+        }
+    </script>
     <script type="module" src="script.js"></script>
     <script src="js/potree-launcher.js"></script>
 </body>

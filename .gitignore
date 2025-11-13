@@ -4,3 +4,8 @@ octree.bin
 *.las
 node_modules/
 *.laz
+raw_data/tree_point_samples.json
+
+# Exclude massive source CSVs (>6 GB)
+raw_data/dalponte2016_newer.csv
+raw_data/newgroups_adjusted_all_v3.csv

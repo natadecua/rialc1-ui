@@ -221,6 +221,35 @@ body.potree-overlay-open {
     color: #2563eb;
 }
 
+.tree-popup__actions {
+    margin: 12px 0;
+}
+
+.view-point-cloud-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    background-color: #2563eb;
+    color: #ffffff;
+    border: none;
+    border-radius: 4px;
+    padding: 6px 12px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.view-point-cloud-btn:hover,
+.view-point-cloud-btn:focus-visible {
+    background-color: #1d4ed8;
+}
+
+.view-point-cloud-btn:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.35);
+}
+
 .filter-controls label {
     display: flex;
     align-items: center;
@@ -1141,6 +1170,189 @@ body.potree-overlay-open {
 
 .group-modal .modal-body {
     max-height: 70vh;
+}
+
+.pointcloud-modal {
+    max-width: 960px;
+    width: min(96%, 960px);
+    height: auto;
+    max-height: 92vh;
+}
+
+.pointcloud-modal .modal-body {
+    padding: 0;
+    min-height: 560px;
+}
+
+.pointcloud-viewer {
+    position: relative;
+    min-height: 560px;
+    background: radial-gradient(circle at top, #1e293b 0%, #020617 60%, #010411 100%);
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.pointcloud-canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+    background: transparent;
+}
+
+.pointcloud-status {
+    position: absolute;
+    left: 16px;
+    bottom: 16px;
+    font-size: 0.95rem;
+    line-height: 1.5;
+    color: #e2e8f0;
+    background: rgba(15, 23, 42, 0.82);
+    border: 1px solid rgba(94, 234, 212, 0.18);
+    border-radius: 10px;
+    padding: 14px 18px;
+    max-width: min(320px, calc(100% - 32px));
+    box-shadow: 0 18px 36px rgba(2, 6, 23, 0.55);
+    pointer-events: none;
+}
+
+.pointcloud-overlay {
+    position: absolute;
+    z-index: 2;
+    color: #e2e8f0;
+    font-size: 0.82rem;
+    line-height: 1.4;
+    pointer-events: none;
+    text-shadow: 0 1px 2px rgba(2, 6, 23, 0.6);
+}
+
+.pointcloud-legend {
+    top: 16px;
+    left: 16px;
+    min-width: 128px;
+    padding: 10px 12px;
+    border-radius: 11px;
+    background: rgba(15, 23, 42, 0.72);
+    border: 1px solid rgba(148, 163, 184, 0.28);
+    backdrop-filter: blur(6px);
+    box-shadow: 0 12px 24px rgba(2, 6, 23, 0.45);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.pointcloud-legend__title {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #bae6fd;
+}
+
+.pointcloud-legend__scale {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 5px;
+}
+
+.pointcloud-legend__bar {
+    width: 12px;
+    height: 90px;
+    border-radius: 999px;
+    background: linear-gradient(180deg, #ede530 0%, #5cd147 25%, #12a69e 50%, #262eb7 75%, #3d1466 100%);
+    border: 1px solid rgba(148, 163, 184, 0.32);
+    box-shadow: inset 0 1px 4px rgba(2, 6, 23, 0.55);
+}
+
+.pointcloud-legend__value {
+    font-size: 0.74rem;
+    color: #e2e8f0;
+}
+
+.pointcloud-legend__caption {
+    font-size: 0.68rem;
+    color: rgba(148, 163, 184, 0.85);
+}
+
+.pointcloud-scale {
+    right: 16px;
+    bottom: 16px;
+    padding: 9px 12px;
+    border-radius: 10px;
+    background: rgba(15, 23, 42, 0.68);
+    border: 1px solid rgba(94, 234, 212, 0.2);
+    backdrop-filter: blur(6px);
+    box-shadow: 0 16px 28px rgba(2, 6, 23, 0.38);
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    align-items: flex-end;
+}
+
+.pointcloud-scale__track {
+    height: 6px;
+    border-radius: 999px;
+    background: rgba(148, 163, 184, 0.24);
+    overflow: hidden;
+}
+
+.pointcloud-scale__fill {
+    height: 100%;
+    background: linear-gradient(90deg, rgba(56, 189, 248, 0.95) 0%, rgba(22, 163, 74, 0.9) 100%);
+    box-shadow: inset 0 1px 2px rgba(2, 6, 23, 0.5);
+}
+
+.pointcloud-scale__label {
+    font-size: 0.7rem;
+    letter-spacing: 0.04em;
+    color: rgba(186, 230, 253, 0.92);
+}
+
+.pointcloud-status.is-loading {
+    color: #38bdf8;
+    border-color: rgba(56, 189, 248, 0.3);
+}
+
+.pointcloud-status.is-error {
+    color: #fca5a5;
+    border-color: rgba(248, 113, 113, 0.35);
+}
+
+@media (max-width: 768px) {
+    .pointcloud-modal .modal-body {
+        min-height: 420px;
+    }
+
+    .pointcloud-viewer {
+        min-height: 420px;
+        border-radius: 10px;
+    }
+
+    .pointcloud-status {
+        left: 12px;
+        right: 12px;
+        bottom: 12px;
+        max-width: none;
+        font-size: 0.9rem;
+        padding: 12px 14px;
+    }
+
+    .pointcloud-legend {
+        top: 12px;
+        left: 12px;
+        padding: 8px 10px;
+        min-width: 116px;
+    }
+
+    .pointcloud-legend__bar {
+        height: 78px;
+    }
+
+    .pointcloud-scale {
+        right: 12px;
+        bottom: 12px;
+        padding: 7px 10px;
+    }
 }
 
 .tree-info {
