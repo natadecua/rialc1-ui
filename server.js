@@ -5,7 +5,7 @@ const cors = require('cors');
 const csv = require('csv-parser');
 const readline = require('readline');
 const app = express();
-const port = 3000;
+const port = process.env.PORT || 3000;
 
 // Enable CORS for all routes
 app.use(cors());
@@ -425,8 +425,22 @@ app.use(
   })
 );
 
-// 3. Serve the pre-generated map tiles from our final tiles directory
-app.use('/tiles', express.static(path.join(__dirname, 'lamesa_forest_final_fixed')));
+// 3. Serve the pre-generated map tiles from our final tiles directory with aggressive caching
+app.use(
+  '/tiles',
+  express.static(path.join(__dirname, 'lamesa_forest_final_fixed'), {
+    maxAge: '30d', // Cache tiles for 30 days in browser
+    etag: true, // Enable ETags for efficient revalidation
+    lastModified: true, // Use Last-Modified headers
+    immutable: true, // Tell browser these files never change
+    setHeaders: (res) => {
+      // Add cache control headers
+      res.set('Cache-Control', 'public, max-age=2592000, immutable');
+      // Add CORS headers for tiles
+      res.set('Access-Control-Allow-Origin', '*');
+    },
+  })
+);
 
 // 4. Serve the Potree library files
 app.use('/Potree_1.8.2', express.static(path.join(__dirname, 'Potree_1.8.2')));

@@ -5,7 +5,6 @@ const FOCUSABLE_SELECTOR =
   'a[href], button:not([disabled]), textarea, input:not([disabled]):not([type="hidden"]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 const DEFAULT_POINT_LIMIT = 50000;
 const DEFAULT_STATUS_MESSAGE = 'Select a tree to view its 3D point cloud.';
-const SCALE_TRACK_WIDTH = 140;
 
 let modalElement = null;
 let closeButton = null;
@@ -35,12 +34,13 @@ let currentLoadToken = 0;
 let legendContainer = null;
 let legendMinLabel = null;
 let legendMaxLabel = null;
-let legendCaption = null;
-let scaleContainer = null;
-let scaleTrack = null;
-let scaleBarFill = null;
-let scaleLabel = null;
 let gridHelper = null;
+let progressContainer = null;
+let progressLabel = null;
+let progressValueText = null;
+let progressFill = null;
+let progressValue = 0;
+let progressHideTimeout = null;
 
 function getFocusableElements(container) {
   if (!container) {
@@ -165,10 +165,6 @@ function setupOverlayElements() {
 
     scaleWrapper.append(legendMaxLabel, bar, legendMinLabel);
 
-    legendCaption = document.createElement('span');
-    legendCaption.className = 'pointcloud-legend__caption';
-    legendCaption.textContent = 'Color ramp: low (bottom) → high (top) intensity';
-
     legendContainer.append(title, scaleWrapper);
   }
 
@@ -180,31 +176,137 @@ function setupOverlayElements() {
     }
   }
 
-  if (!scaleContainer) {
-    scaleContainer = document.createElement('div');
-    scaleContainer.className = 'pointcloud-overlay pointcloud-scale';
-    scaleContainer.hidden = true;
+  if (!progressContainer) {
+    progressContainer = document.createElement('div');
+    progressContainer.className = 'pointcloud-progress';
+    progressContainer.setAttribute('role', 'progressbar');
+    progressContainer.setAttribute('aria-valuemin', '0');
+    progressContainer.setAttribute('aria-valuemax', '100');
+    progressContainer.setAttribute('aria-valuenow', '0');
+    progressContainer.hidden = true;
+    progressContainer.setAttribute('aria-hidden', 'true');
 
-    scaleTrack = document.createElement('div');
-    scaleTrack.className = 'pointcloud-scale__track';
-  scaleTrack.style.width = `${SCALE_TRACK_WIDTH}px`;
+    progressLabel = document.createElement('div');
+    progressLabel.className = 'pointcloud-progress__label';
+    progressLabel.textContent = 'Loading point cloud';
 
-    scaleBarFill = document.createElement('div');
-    scaleBarFill.className = 'pointcloud-scale__fill';
-    scaleBarFill.style.width = '0px';
+    progressValueText = document.createElement('div');
+    progressValueText.className = 'pointcloud-progress__value';
+    progressValueText.textContent = '0%';
 
-    scaleTrack.appendChild(scaleBarFill);
+    const track = document.createElement('div');
+    track.className = 'pointcloud-progress__track';
 
-    scaleLabel = document.createElement('div');
-    scaleLabel.className = 'pointcloud-scale__label';
-    scaleLabel.textContent = 'Scale';
+    progressFill = document.createElement('div');
+    progressFill.className = 'pointcloud-progress__fill';
+    track.appendChild(progressFill);
 
-    scaleContainer.append(scaleTrack, scaleLabel);
+    progressContainer.append(progressLabel, progressValueText, track);
   }
 
-  if (!scaleContainer.parentElement) {
-    viewerElement.appendChild(scaleContainer);
+  if (!progressContainer.parentElement) {
+    viewerElement.appendChild(progressContainer);
   }
+}
+
+function showProgressBar(label = 'Loading point cloud…', value = 0) {
+  if (!progressContainer) {
+    return;
+  }
+
+  if (progressHideTimeout) {
+    clearTimeout(progressHideTimeout);
+    progressHideTimeout = null;
+  }
+
+  progressContainer.hidden = false;
+  progressContainer.setAttribute('aria-hidden', 'false');
+  progressContainer.classList.add('is-visible');
+  updateProgressBar(value, label);
+}
+
+function updateProgressBar(value, label) {
+  if (!progressContainer || !progressFill || !progressValueText) {
+    return;
+  }
+
+  progressValue = Math.max(0, Math.min(100, value));
+  progressFill.style.transform = `scaleX(${progressValue / 100})`;
+  progressValueText.textContent = `${Math.round(progressValue)}%`;
+  progressContainer.setAttribute('aria-valuenow', `${Math.round(progressValue)}`);
+
+  if (label && progressLabel) {
+    progressLabel.textContent = label;
+  }
+}
+
+function hideProgressBar({ immediate = false } = {}) {
+  if (!progressContainer) {
+    return;
+  }
+
+  const doHide = () => {
+    progressContainer.hidden = true;
+    progressContainer.setAttribute('aria-hidden', 'true');
+  };
+
+  if (immediate) {
+    progressContainer.classList.remove('is-visible');
+    doHide();
+    return;
+  }
+
+  progressContainer.classList.remove('is-visible');
+  progressHideTimeout = window.setTimeout(doHide, 400);
+}
+
+async function parsePointCloudPayload(response, requestToken) {
+  if (!response) {
+    return null;
+  }
+
+  if (!response.body || typeof response.body.getReader !== 'function') {
+    const payload = await response.json();
+    return requestToken === currentLoadToken ? payload : null;
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let result = '';
+  let receivedLength = 0;
+  const contentLengthHeader = response.headers.get('Content-Length');
+  const totalLength = contentLengthHeader ? Number(contentLengthHeader) : null;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (requestToken !== currentLoadToken) {
+      try {
+        reader.cancel();
+      } catch (cancelError) {
+        console.warn('Point cloud reader cancel failed:', cancelError);
+      }
+      return null;
+    }
+
+    if (done) {
+      break;
+    }
+
+    if (value) {
+      receivedLength += value.byteLength;
+      result += decoder.decode(value, { stream: true });
+
+      if (Number.isFinite(totalLength) && totalLength > 0) {
+        const progressRatio = Math.min(0.95, receivedLength / totalLength);
+        updateProgressBar(progressRatio * 90 + 5, 'Downloading points…');
+      } else {
+        updateProgressBar(Math.min(95, progressValue + 4), 'Downloading points…');
+      }
+    }
+  }
+
+  result += decoder.decode();
+  return JSON.parse(result);
 }
 
 function formatLegendValue(value) {
@@ -239,33 +341,6 @@ function formatScaleValue(value) {
   return Number(value.toFixed(decimals)).toLocaleString();
 }
 
-function computeScaleLength(range) {
-  if (!Number.isFinite(range) || range <= 0) {
-    return null;
-  }
-
-  const raw = range / 4;
-  if (raw === 0) {
-    return null;
-  }
-
-  const exponent = Math.floor(Math.log10(raw));
-  const fraction = raw / 10 ** exponent;
-
-  let niceFraction;
-  if (fraction < 1.5) {
-    niceFraction = 1;
-  } else if (fraction < 3) {
-    niceFraction = 2;
-  } else if (fraction < 7) {
-    niceFraction = 5;
-  } else {
-    niceFraction = 10;
-  }
-
-  return niceFraction * 10 ** exponent;
-}
-
 function updateLegend(minIntensity, maxIntensity) {
   setupOverlayElements();
   if (!legendContainer) {
@@ -291,26 +366,6 @@ function updateLegend(minIntensity, maxIntensity) {
   if (legendMaxLabel) {
     legendMaxLabel.textContent = formatLegendValue(maxIntensity);
   }
-}
-
-function updateScaleIndicator(range) {
-  setupOverlayElements();
-  if (!scaleContainer || !scaleTrack || !scaleBarFill || !scaleLabel) {
-    return;
-  }
-
-  const length = computeScaleLength(range);
-  if (!Number.isFinite(length) || length <= 0) {
-    scaleContainer.hidden = true;
-    scaleBarFill.style.width = '0px';
-    return;
-  }
-
-  const ratio = Math.min(1, Math.max(0, length / range));
-  const width = Math.max(40, Math.round(ratio * SCALE_TRACK_WIDTH));
-  scaleBarFill.style.width = `${width}px`;
-  scaleContainer.hidden = false;
-  scaleLabel.textContent = `≈ ${formatScaleValue(length)} units`;
 }
 
 function disposeGridHelper() {
@@ -372,7 +427,6 @@ function updateGridHelper(boundingBox) {
 
 function resetOverlayIndicators() {
   updateLegend(null, null);
-  updateScaleIndicator(null);
   disposeGridHelper();
 }
 
@@ -671,11 +725,14 @@ async function loadTreePointCloud(treeId, speciesLabel, requestToken) {
   }
 
   try {
+    showProgressBar('Requesting point cloud…', 4);
+
     const response = await fetch(
       `/api/trees/${encodeURIComponent(treeId)}/pointcloud?limit=${DEFAULT_POINT_LIMIT}`
     );
 
     if (requestToken !== currentLoadToken) {
+      hideProgressBar({ immediate: true });
       return;
     }
 
@@ -691,11 +748,14 @@ async function loadTreePointCloud(treeId, speciesLabel, requestToken) {
       }
 
       setStatus(message, { isError: true });
+      hideProgressBar({ immediate: true });
       return;
     }
 
-    const payload = await response.json();
-    if (requestToken !== currentLoadToken) {
+    updateProgressBar(20, 'Downloading points…');
+    const payload = await parsePointCloudPayload(response, requestToken);
+    if (requestToken !== currentLoadToken || !payload) {
+      hideProgressBar({ immediate: true });
       return;
     }
 
@@ -709,10 +769,13 @@ async function loadTreePointCloud(treeId, speciesLabel, requestToken) {
     if (points.length === 0) {
       setStatus(`No point cloud data available for tree ${treeId}.`, { isError: true });
       disposeActivePoints();
+      hideProgressBar({ immediate: true });
       return;
     }
 
     disposeActivePoints();
+
+    updateProgressBar(65, 'Normalizing coordinates…');
 
     const positions = new Float32Array(points.length * 3);
     const colors = new Float32Array(points.length * 3);
@@ -797,27 +860,30 @@ async function loadTreePointCloud(treeId, speciesLabel, requestToken) {
     const deltaZ = maxZ - minZ;
     const extent = Math.max(deltaX, deltaY, deltaZ);
 
-    updateScaleIndicator(extent);
-
     const totalPoints = Number.isFinite(payload.totalPoints)
       ? payload.totalPoints
       : points.length;
     const sampledPoints = payload.sampledPoints ?? points.length;
     const speciesSuffix = speciesLabel ? ` · ${speciesLabel}` : '';
 
+    updateProgressBar(100, 'Rendering point cloud…');
+    hideProgressBar();
+
     setStatus(
       `Tree ${treeId}${speciesSuffix}: showing ${sampledPoints.toLocaleString()} of ${totalPoints.toLocaleString()} points. Range ≈ ${extent.toFixed(
         2
-      )} units.`
+      )}`
     );
   } catch (error) {
     if (requestToken !== currentLoadToken) {
+      hideProgressBar({ immediate: true });
       return;
     }
 
     console.error('Point cloud load failure:', error);
     resetOverlayIndicators();
     setStatus('An unexpected error occurred while loading the point cloud.', { isError: true });
+    hideProgressBar({ immediate: true });
   }
 }
 
@@ -825,6 +891,7 @@ function resetViewer() {
   currentLoadToken += 1;
   disposeActivePoints();
   stopRendering();
+  hideProgressBar({ immediate: true });
   setStatus(DEFAULT_STATUS_MESSAGE);
 }
 
@@ -837,6 +904,7 @@ function openModal() {
   modalElement.classList.add('show');
   modalElement.setAttribute('aria-hidden', 'false');
   isModalOpen = true;
+  document.body.classList.add('no-scroll');
   activateFocusTrap();
 }
 
@@ -850,6 +918,7 @@ function closeModal() {
   modalElement.setAttribute('aria-hidden', 'true');
   isModalOpen = false;
   resetViewer();
+  document.body.classList.remove('no-scroll');
 
   if (lastFocusedElement && typeof lastFocusedElement.focus === 'function') {
     lastFocusedElement.focus();
@@ -953,8 +1022,8 @@ export function disposePointCloudViewer() {
     legendContainer.parentElement.removeChild(legendContainer);
   }
 
-  if (scaleContainer && scaleContainer.parentElement) {
-    scaleContainer.parentElement.removeChild(scaleContainer);
+  if (progressContainer && progressContainer.parentElement) {
+    progressContainer.parentElement.removeChild(progressContainer);
   }
 
   modalElement = null;
@@ -979,11 +1048,11 @@ export function disposePointCloudViewer() {
   legendContainer = null;
   legendMinLabel = null;
   legendMaxLabel = null;
-  legendCaption = null;
-  scaleContainer = null;
-  scaleTrack = null;
-  scaleBarFill = null;
-  scaleLabel = null;
+  progressContainer = null;
+  progressLabel = null;
+  progressValueText = null;
+  progressFill = null;
+  progressValue = 0;
 }
 
 export { closeModal as closePointCloudViewer };

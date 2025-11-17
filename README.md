@@ -105,3 +105,21 @@ npm run lint
 # Start server
 npm start
 ```
+
+### Cloudflare Tunnel (unmetered sharing)
+
+Use Cloudflare Tunnel when you need unlimited HTTPS requests for user tests without exposing your IP or exhausting ngrok quotas.
+
+1. Install `cloudflared` (one-time):
+
+```powershell
+winget install Cloudflare.cloudflared
+```
+
+2. Start a tunnel that points to the local Express server:
+
+```powershell
+cloudflared tunnel --url http://localhost:3000
+```
+
+The CLI prints a persistent HTTPS URL (e.g. `https://warm-forest.trycloudflare.com`). Share that link with testers—Cloudflare absorbs the traffic while your local port 3000 remains private. Stop the tunnel with `Ctrl+C` when finished.

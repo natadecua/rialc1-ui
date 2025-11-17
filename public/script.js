@@ -22,6 +22,23 @@ let predictionIndex = new Map();
 let treeLayerIndex = new Map();
 let currentSearchTerm = '';
 let selectedTreeId = null;
+const legendCollapseMediaQuery = window.matchMedia('(max-width: 768px)');
+let isLegendCollapsed = legendCollapseMediaQuery.matches;
+
+const handleLegendCollapseChange = (event) => {
+  isLegendCollapsed = event.matches;
+  if (map) {
+    requestAnimationFrame(() => {
+      createSpeciesLegend();
+    });
+  }
+};
+
+if (typeof legendCollapseMediaQuery.addEventListener === 'function') {
+  legendCollapseMediaQuery.addEventListener('change', handleLegendCollapseChange);
+} else if (typeof legendCollapseMediaQuery.addListener === 'function') {
+  legendCollapseMediaQuery.addListener(handleLegendCollapseChange);
+}
 
 const FOCUSABLE_SELECTOR =
   'a[href], button:not([disabled]), textarea, input:not([disabled]):not([type="hidden"]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -113,6 +130,165 @@ const HTML_ESCAPE_MAP = {
   '"': '&quot;',
   "'": '&#39;',
 };
+
+function initializeMapControlsSheet() {
+  const mapControls = document.getElementById('mapControls');
+  const fab = document.getElementById('mapToolsFab');
+  const scrim = document.getElementById('mapToolsScrim');
+
+  if (!mapControls || !fab || !scrim) {
+    return;
+  }
+
+  const closeButton = document.getElementById('mapControlsClose');
+  const collapseButton = document.getElementById('mapControlsCollapse');
+  const mediaQuery = window.matchMedia('(max-width: 1024px)');
+  let isSheetOpen = false;
+  let hasActiveFocusTrap = false;
+
+  const isMobileSheet = () => mediaQuery.matches;
+
+  const hideScrim = () => {
+    scrim.classList.remove('visible');
+    scrim.hidden = true;
+  };
+
+  const showScrim = () => {
+    scrim.hidden = false;
+    requestAnimationFrame(() => scrim.classList.add('visible'));
+  };
+
+  const releaseSheetFocusTrap = () => {
+    if (!hasActiveFocusTrap) {
+      return;
+    }
+    releaseFocusTrap(mapControls);
+    hasActiveFocusTrap = false;
+  };
+
+  const setBodyScrollLock = (locked) => {
+    document.body.classList.toggle('no-scroll', locked);
+  };
+
+  const syncState = () => {
+    if (isMobileSheet()) {
+      mapControls.setAttribute('aria-modal', 'true');
+      mapControls.setAttribute('aria-hidden', String(!isSheetOpen));
+      fab.setAttribute('aria-expanded', isSheetOpen ? 'true' : 'false');
+      return;
+    }
+
+    mapControls.classList.remove('map-controls--open');
+    hideScrim();
+    releaseSheetFocusTrap();
+    setBodyScrollLock(false);
+    const collapsed = document.body.classList.contains('map-tools-collapsed');
+    mapControls.setAttribute('aria-modal', 'false');
+    mapControls.setAttribute('aria-hidden', String(collapsed));
+    fab.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+  };
+
+  const closeSheet = () => {
+    isSheetOpen = false;
+    mapControls.classList.remove('map-controls--open');
+    hideScrim();
+    releaseSheetFocusTrap();
+    setBodyScrollLock(false);
+    syncState();
+  };
+
+  const openSheet = () => {
+    if (!isMobileSheet()) {
+      return;
+    }
+
+    isSheetOpen = true;
+    mapControls.classList.add('map-controls--open');
+    showScrim();
+    activateFocusTrap(mapControls, closeSheet);
+    hasActiveFocusTrap = true;
+    setBodyScrollLock(true);
+    syncState();
+  };
+
+  const collapseDesktopCard = () => {
+    if (isMobileSheet()) {
+      closeSheet();
+      return;
+    }
+    document.body.classList.add('map-tools-collapsed');
+    syncState();
+  };
+
+  const expandDesktopCard = () => {
+    document.body.classList.remove('map-tools-collapsed');
+    syncState();
+    requestAnimationFrame(() => {
+      mapControls.focus({ preventScroll: true });
+    });
+  };
+
+  const handleFabClick = () => {
+    if (isMobileSheet()) {
+      if (isSheetOpen) {
+        closeSheet();
+      } else {
+        openSheet();
+      }
+      return;
+    }
+    expandDesktopCard();
+  };
+
+  fab.addEventListener('click', handleFabClick);
+  scrim.addEventListener('click', closeSheet);
+
+  if (closeButton) {
+    closeButton.addEventListener('click', closeSheet);
+  }
+
+  if (collapseButton) {
+    collapseButton.addEventListener('click', collapseDesktopCard);
+  }
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && isSheetOpen && isMobileSheet()) {
+      closeSheet();
+    }
+  });
+
+  mediaQuery.addEventListener('change', () => {
+    if (!isMobileSheet()) {
+      isSheetOpen = false;
+      closeSheet();
+      expandDesktopCard();
+      return;
+    }
+    document.body.classList.remove('map-tools-collapsed');
+    syncState();
+  });
+
+  // Initialise states based on the current viewport
+  document.body.classList.remove('map-tools-collapsed');
+  syncState();
+}
+
+function registerServiceWorker() {
+  if (!('serviceWorker' in navigator)) {
+    return;
+  }
+
+  window.addEventListener('load', () => {
+    navigator.serviceWorker
+      .register('/service-worker.js')
+      .then((registration) => {
+        console.log('Service worker registered:', registration.scope);
+      })
+      .catch((error) => {
+        console.warn('Service worker registration failed:', error);
+      });
+  });
+}
 
 function escapeHtml(value) {
   if (value === null || value === undefined) {
@@ -732,6 +908,22 @@ function getActiveFilters() {
   };
 }
 
+function resetFilterControlsToDefaults() {
+  const defaultStates = {
+    filterUnknownSpecies: true,
+    filterCorrect: true,
+    filterIncorrect: true,
+    filterTraining: true,
+  };
+
+  Object.entries(defaultStates).forEach(([id, checked]) => {
+    const control = document.getElementById(id);
+    if (control) {
+      control.checked = checked;
+    }
+  });
+}
+
 function recomputeFilteredData() {
   let data = [...originalTreeData];
   const filters = getActiveFilters();
@@ -927,6 +1119,16 @@ function highlightSelectedRow() {
       row.scrollIntoView({ block: 'nearest' });
     }
   });
+
+  const cards = document.querySelectorAll('.tree-card');
+  const cardViewActive = window.matchMedia('(max-width: 1024px)').matches;
+  cards.forEach((card) => {
+    const isSelected = card.dataset.treeId === selectedTreeId;
+    card.classList.toggle('tree-card--selected', Boolean(isSelected));
+    if (isSelected && cardViewActive) {
+      card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  });
 }
 
 function bindSortHeaderEvents() {
@@ -1038,6 +1240,8 @@ function togglePredictionMode(forceState) {
 document.addEventListener('DOMContentLoaded', async function () {
   console.log('LiDAR Tree Species Identification UI initialized successfully');
 
+  registerServiceWorker();
+
   // Define the custom projection for PRS92 / Philippines zone 3 (EPSG:3123)
   if (typeof proj4 !== 'undefined') {
     // Updated projection parameters based on working simple-shapefile.html
@@ -1056,6 +1260,21 @@ document.addEventListener('DOMContentLoaded', async function () {
   setupEventListeners();
   initPointCloudViewer();
   updateModelPerformance();
+  
+  // Collapse sidebar on mobile by default
+  if (window.innerWidth <= 768) {
+    const sidePanel = document.getElementById('sidePanel');
+    if (sidePanel) {
+      sidePanel.classList.add('collapsed');
+      const panelToggle = document.getElementById('panelToggle');
+      if (panelToggle) {
+        panelToggle.setAttribute('aria-expanded', 'false');
+        const icon = panelToggle.querySelector('[aria-hidden="true"]');
+        if (icon) icon.textContent = '▶';
+      }
+    }
+  }
+  
   await loadData();
 
   // Load prediction data AFTER shapefile data is loaded, passing the tree data for species mapping
@@ -1114,35 +1333,55 @@ document.addEventListener('DOMContentLoaded', async function () {
  */
 function initializeMap() {
   const center = [14.7137, 121.0707];
+  
+  // Define strict bounds for La Mesa to prevent unnecessary tile loading
+  const lameSaBounds = L.latLngBounds(
+    L.latLng(14.7050, 121.0650), // Southwest corner
+    L.latLng(14.7180, 121.0800)  // Northeast corner
+  );
 
   map = L.map('map', {
+    maxBounds: lameSaBounds,
+    maxBoundsViscosity: 1.0,
     center: center,
     zoom: 17,
-    minZoom: 15,
-    maxZoom: 22,
+    minZoom: 17,
+    maxZoom: 20,
+    noWrap: true,
+    preferCanvas: true,
   });
 
+  // Base layers - NOT added by default to save requests
   const osmBase = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution:
       '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    maxZoom: 19,
   });
 
   const satelliteBase = L.tileLayer(
     'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
     {
       attribution: 'Tiles &copy; Esri',
+      maxZoom: 19,
     }
   );
 
-  osmBase.addTo(map);
+  // NO base layer by default - saves requests!
+  // osmBase.addTo(map);
 
-  // Create forest tile layer
-  const forestTiles = L.tileLayer('http://localhost:3000/tiles/{z}/{x}/{y}.png', {
+  // Create forest tile layer with aggressive caching
+  const forestTiles = L.tileLayer('/tiles/{z}/{x}/{y}.png', {
     attribution: 'Forest Tiles &copy; natadecua',
-    minZoom: 15,
-    maxZoom: 22,
-    tms: true, // Use TMS coordinates (y-flipped)
+    minZoom: 17,
+    maxZoom: 20,
+    tms: true,
     opacity: 1.0,
+    crossOrigin: true,
+    keepBuffer: 1,
+    reuseTiles: true,
+    updateWhenIdle: true,
+    updateWhenZooming: false,
+    bounds: lameSaBounds,
   });
 
   // Add forest tiles to the map
@@ -1165,11 +1404,8 @@ function initializeMap() {
   // This forces Leaflet to re-calculate its container size after all CSS has been applied.
   setTimeout(() => {
     map.invalidateSize();
-    // After invalidating, fit the bounds to the general area.
-    map.fitBounds([
-      [14.7087, 121.0671],
-      [14.7156, 121.077],
-    ]);
+    // Start at a higher zoom level to load fewer tiles
+    map.setView(center, 17);
   }, 100);
 }
 
@@ -1240,22 +1476,56 @@ function createSpeciesLegend() {
   const legendControl = L.control({ position: 'bottomright' });
 
   legendControl.onAdd = function () {
-    const div = L.DomUtil.create('div', 'species-legend-control');
-    div.style.backgroundColor = 'white';
-    div.style.padding = '10px';
-    div.style.borderRadius = '5px';
-    div.style.boxShadow = '0 1px 5px rgba(0,0,0,0.4)';
-    div.style.maxHeight = '300px';
-    div.style.overflowY = 'auto';
-    div.style.minWidth = '180px';
+    const container = L.DomUtil.create('section', 'species-legend-control');
+    container.setAttribute('role', 'region');
+    container.setAttribute(
+      'aria-label',
+      isPredictionMode ? 'Legend for prediction accuracy' : 'Legend for tree species'
+    );
+    container.classList.toggle('is-collapsed', isLegendCollapsed);
+
+    const header = document.createElement('div');
+    header.className = 'species-legend-control__header';
+
+    const title = document.createElement('p');
+    title.className = 'species-legend-control__title';
+    title.textContent = 'Map Legend';
+
+    const toggleButton = document.createElement('button');
+    toggleButton.type = 'button';
+    toggleButton.className = 'species-legend-control__toggle';
+    toggleButton.setAttribute('aria-label', 'Toggle legend visibility');
+    toggleButton.setAttribute('aria-expanded', String(!isLegendCollapsed));
+    toggleButton.textContent = isLegendCollapsed ? 'Show' : 'Hide';
+
+    const bodyId = `speciesLegendBody-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    const body = document.createElement('div');
+    body.className = 'species-legend-control__body';
+    body.id = bodyId;
+    toggleButton.setAttribute('aria-controls', bodyId);
+
+    toggleButton.addEventListener('click', () => {
+      isLegendCollapsed = !isLegendCollapsed;
+      container.classList.toggle('is-collapsed', isLegendCollapsed);
+      toggleButton.setAttribute('aria-expanded', String(!isLegendCollapsed));
+      toggleButton.textContent = isLegendCollapsed ? 'Show' : 'Hide';
+    });
+
+    header.appendChild(title);
+    header.appendChild(toggleButton);
+    container.appendChild(header);
+    container.appendChild(body);
 
     const activeFeatures =
       Array.isArray(filteredData) && filteredData.length > 0 ? filteredData : originalTreeData;
 
+    const modeSubtitle = document.createElement('div');
+    modeSubtitle.className = 'species-legend-control__subtitle';
+    modeSubtitle.textContent = isPredictionMode ? 'Prediction Results' : 'Tree Species';
+    body.appendChild(modeSubtitle);
+
     if (isPredictionMode) {
       // Prediction mode legend
-      div.innerHTML =
-        '<div style="font-weight: bold; margin-bottom: 8px; font-size: 14px;">Prediction Results</div>';
 
       const stats = {
         training: 0,
@@ -1303,34 +1573,26 @@ function createSpeciesLegend() {
 
       if (totalTrees === 0) {
         const emptyMessage = document.createElement('div');
-        emptyMessage.style.fontSize = '12px';
-        emptyMessage.style.color = '#555';
+        emptyMessage.className = 'species-legend-control__meta';
         emptyMessage.textContent = 'No prediction records match the current filters.';
-        div.appendChild(emptyMessage);
-        return div;
+        body.appendChild(emptyMessage);
+        return container;
       }
 
       const appendLegendRow = (label, count, color) => {
         const item = document.createElement('div');
-        item.style.display = 'flex';
-        item.style.alignItems = 'center';
-        item.style.marginBottom = '5px';
+        item.className = 'species-legend-control__row';
 
         const colorBox = document.createElement('span');
-        colorBox.style.display = 'inline-block';
-        colorBox.style.width = '15px';
-        colorBox.style.height = '15px';
+        colorBox.className = 'species-legend-control__swatch';
         colorBox.style.backgroundColor = color;
-        colorBox.style.marginRight = '5px';
-        colorBox.style.borderRadius = '3px';
 
         const labelSpan = document.createElement('span');
         labelSpan.textContent = `${label} (${count})`;
-        labelSpan.style.fontSize = '12px';
 
         item.appendChild(colorBox);
         item.appendChild(labelSpan);
-        div.appendChild(item);
+        body.appendChild(item);
       };
 
       appendLegendRow('Training Data', stats.training, '#FFC107');
@@ -1338,34 +1600,29 @@ function createSpeciesLegend() {
       appendLegendRow('Incorrect', stats.incorrect, '#F44336');
 
       const separator = document.createElement('hr');
-      separator.style.margin = '10px 0';
-      separator.style.border = 'none';
-      separator.style.borderTop = '1px solid #eee';
-      div.appendChild(separator);
+      separator.className = 'species-legend-control__divider';
+      body.appendChild(separator);
 
       if (totalPredictions > 0) {
         const accuracy = ((stats.correct / totalPredictions) * 100).toFixed(1);
         const accuracyItem = document.createElement('div');
-        accuracyItem.style.fontSize = '13px';
-        accuracyItem.style.fontWeight = 'bold';
+        accuracyItem.className = 'species-legend-control__meta';
         accuracyItem.textContent = `Test Accuracy: ${accuracy}%`;
-        div.appendChild(accuracyItem);
+        body.appendChild(accuracyItem);
       } else {
         const accuracyItem = document.createElement('div');
-        accuracyItem.style.fontSize = '13px';
-        accuracyItem.style.fontWeight = 'bold';
+        accuracyItem.className = 'species-legend-control__meta';
         accuracyItem.textContent = 'Test Accuracy: —';
-        div.appendChild(accuracyItem);
+        body.appendChild(accuracyItem);
       }
 
       const trainingRatio = totalTrees === 0 ? 0 : (stats.training / totalTrees) * 100;
       const testRatio = totalTrees === 0 ? 0 : (totalPredictions / totalTrees) * 100;
 
       const ratioItem = document.createElement('div');
-      ratioItem.style.fontSize = '12px';
-      ratioItem.style.marginTop = '5px';
+      ratioItem.className = 'species-legend-control__meta';
       ratioItem.textContent = `Train/Test: ${trainingRatio.toFixed(1)}% / ${testRatio.toFixed(1)}%`;
-      div.appendChild(ratioItem);
+      body.appendChild(ratioItem);
 
       const groupEntries = Array.from(stats.groups.entries())
         .filter(([, info]) => info && info.count > 0)
@@ -1374,15 +1631,11 @@ function createSpeciesLegend() {
 
       if (groupEntries.length > 0) {
         const groupSeparator = document.createElement('hr');
-        groupSeparator.style.margin = '10px 0';
-        groupSeparator.style.border = 'none';
-        groupSeparator.style.borderTop = '1px solid #eee';
-        div.appendChild(groupSeparator);
+        groupSeparator.className = 'species-legend-control__divider';
+        body.appendChild(groupSeparator);
 
         const groupExplanation = document.createElement('div');
-        groupExplanation.style.fontSize = '11px';
-        groupExplanation.style.marginTop = '4px';
-        groupExplanation.style.color = '#555';
+        groupExplanation.className = 'species-legend-control__meta';
 
         let groupText = '<strong>Species Groups (Filtered):</strong><br>';
         groupEntries.forEach(([groupKey, info]) => {
@@ -1395,7 +1648,7 @@ function createSpeciesLegend() {
         });
 
         groupExplanation.innerHTML = groupText;
-        div.appendChild(groupExplanation);
+        body.appendChild(groupExplanation);
       }
     } else {
       // Regular species mode legend
@@ -1403,33 +1656,22 @@ function createSpeciesLegend() {
       const speciesData = collectSpeciesData(activeFeatures);
       const speciesNames = Object.keys(speciesData).sort();
 
-      // Add title
-      div.innerHTML =
-        '<div style="font-weight: bold; margin-bottom: 8px; font-size: 14px;">Tree Species</div>';
-
       // Add each species to the legend
       speciesNames.forEach((name) => {
         const data = speciesData[name];
         const item = document.createElement('div');
-        item.style.display = 'flex';
-        item.style.alignItems = 'center';
-        item.style.marginBottom = '5px';
+        item.className = 'species-legend-control__row';
 
         const colorBox = document.createElement('span');
-        colorBox.style.display = 'inline-block';
-        colorBox.style.width = '15px';
-        colorBox.style.height = '15px';
+        colorBox.className = 'species-legend-control__swatch';
         colorBox.style.backgroundColor = data.color;
-        colorBox.style.marginRight = '5px';
-        colorBox.style.borderRadius = '3px';
 
         const nameSpan = document.createElement('span');
         nameSpan.textContent = `${name} (${data.count})`;
-        nameSpan.style.fontSize = '12px';
 
         item.appendChild(colorBox);
         item.appendChild(nameSpan);
-        div.appendChild(item);
+        body.appendChild(item);
       });
 
       // Also add dynamically assigned colors
@@ -1442,41 +1684,33 @@ function createSpeciesLegend() {
         // Add separator if we have both predefined and dynamic colors
         if (speciesNames.length > 0) {
           const separator = document.createElement('hr');
-          separator.style.margin = '10px 0';
-          separator.style.border = 'none';
-          separator.style.borderTop = '1px solid #eee';
-          div.appendChild(separator);
+          separator.className = 'species-legend-control__divider';
+          body.appendChild(separator);
         }
 
         dynamicSpeciesNames.forEach((name) => {
           const item = document.createElement('div');
-          item.style.display = 'flex';
-          item.style.alignItems = 'center';
-          item.style.marginBottom = '5px';
+          item.className = 'species-legend-control__row';
 
           const colorBox = document.createElement('span');
-          colorBox.style.display = 'inline-block';
-          colorBox.style.width = '15px';
-          colorBox.style.height = '15px';
+          colorBox.className = 'species-legend-control__swatch';
           colorBox.style.backgroundColor = dynamicAssignments[name];
-          colorBox.style.marginRight = '5px';
-          colorBox.style.borderRadius = '3px';
 
           const nameSpan = document.createElement('span');
           nameSpan.textContent = name;
-          nameSpan.style.fontSize = '12px';
 
           item.appendChild(colorBox);
           item.appendChild(nameSpan);
-          div.appendChild(item);
+          body.appendChild(item);
         });
       }
     }
 
     // Prevent click events from propagating to the map
-    L.DomEvent.disableClickPropagation(div);
+    L.DomEvent.disableClickPropagation(container);
+    L.DomEvent.disableScrollPropagation(container);
 
-    return div;
+    return container;
   };
 
   // Add the legend to the map
@@ -1594,6 +1828,43 @@ function setupEventListeners() {
     updatePanelState(sidePanel.classList.contains('collapsed'));
   }
 
+  initializeMapControlsSheet();
+
+  const clearFiltersBtn = document.getElementById('clearFiltersBtn');
+  if (clearFiltersBtn) {
+    clearFiltersBtn.addEventListener('click', () => {
+      resetFilterControlsToDefaults();
+      refreshDataViews({ preserveSelection: true });
+    });
+  }
+
+  const resultsCards = document.getElementById('resultsCards');
+  if (resultsCards) {
+    resultsCards.addEventListener('click', (event) => {
+      const pointCloudButton = event.target.closest('.view-point-cloud-btn');
+      if (pointCloudButton) {
+        return;
+      }
+
+      const focusButton = event.target.closest('[data-tree-action="focus"]');
+      const card = event.target.closest('.tree-card');
+      const treeId = focusButton?.dataset.treeId || card?.dataset.treeId;
+
+      if (!treeId) {
+        return;
+      }
+
+      if (focusButton) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+
+      selectedTreeId = treeId.toString();
+      highlightSelectedRow();
+      focusTreeOnMap(treeId.toString(), { openPopup: true, fitBounds: true });
+    });
+  }
+
   // Enable prediction filters
   ['filterCorrect', 'filterIncorrect', 'filterTraining'].forEach((id) => {
     const checkbox = document.getElementById(id);
@@ -1669,6 +1940,7 @@ function setupEventListeners() {
     if (!groupInfoModal) return;
     groupInfoModal.classList.remove('show');
     groupInfoModal.setAttribute('aria-hidden', 'true');
+    document.body.classList.remove('no-scroll');
     releaseFocusTrap(groupInfoModal);
     if (lastFocusedElement && typeof lastFocusedElement.focus === 'function') {
       lastFocusedElement.focus();
@@ -1680,6 +1952,7 @@ function setupEventListeners() {
     lastFocusedElement = document.activeElement;
     groupInfoModal.classList.add('show');
     groupInfoModal.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('no-scroll');
     activateFocusTrap(groupInfoModal, closeGroupModalDialog);
   };
 
@@ -2290,7 +2563,155 @@ function populateResultsTable() {
     tableBody.appendChild(row);
   });
 
+  renderResultsCards(filteredData);
   highlightSelectedRow();
+}
+
+function resolveTreeCardStatus(treeId, groupLabel) {
+  if (isPredictionMode && treeId) {
+    const prediction = getPredictionForTree(treeId);
+    if (!prediction) {
+      return null;
+    }
+
+    if (prediction.isTraining) {
+      return { label: 'Training Sample', modifier: 'training' };
+    }
+
+    return prediction.correct
+      ? { label: 'Correct Prediction', modifier: 'correct' }
+      : { label: 'Incorrect Prediction', modifier: 'incorrect' };
+  }
+
+  if (!isPredictionMode && groupLabel) {
+    return { label: groupLabel, modifier: 'group' };
+  }
+
+  return null;
+}
+
+function buildTreeCard(tree) {
+  if (!tree || !tree.properties) {
+    return null;
+  }
+
+  const props = tree.properties;
+  const rawTreeId = props.tree_id ?? props.TreeId ?? props.id;
+  const treeIdValue = rawTreeId === null || rawTreeId === undefined ? '' : rawTreeId.toString();
+  const treeLabel = treeIdValue || 'Unknown';
+  const commonName = props.Cmmn_Nm || props.cmmn_nm || props.species || 'Unknown species';
+  const scientificName = props.Scntf_N || props.scntf_n || '';
+  const family = props.Family || props.family || '—';
+  const groupLabel = formatGroupLabel(props.group_d ?? props.group_id);
+  const crownRaw = coalesceProperty(props, [
+    'crown_diameter_m',
+    'specs_d',
+    'specis_d',
+    'crown_width',
+    'width',
+    'WIDTH',
+  ]);
+  const crownNumeric = Number(crownRaw);
+  const crownDisplay =
+    Number.isFinite(crownNumeric) && crownNumeric > 0
+      ? formatMeasurement(crownNumeric, 'm', { maximumFractionDigits: 2 })
+      : '—';
+
+  const areaRaw = coalesceProperty(props, ['planar_canopy_area_m2', 'planar_canopy_area', 'area']);
+  const areaNumeric = Number(areaRaw);
+  const areaDisplay =
+    Number.isFinite(areaNumeric) && areaNumeric > 0 ? formatArea(areaNumeric) : '—';
+
+  const speciesColor = getSpeciesColor(commonName, treeIdValue) || '#94a3b8';
+  const status = resolveTreeCardStatus(treeIdValue, groupLabel);
+  const statusMarkup = status
+    ? `<span class="tree-card__status tree-card__status--${status.modifier}">${escapeHtml(
+        status.label
+      )}</span>`
+    : '';
+  const scientificMarkup = scientificName
+    ? `<span class="tree-card__subtitle-em">(${escapeHtml(scientificName)})</span>`
+    : '';
+
+  const card = document.createElement('article');
+  card.className = 'tree-card';
+  if (status?.modifier) {
+    card.classList.add(`tree-card--status-${status.modifier}`);
+  }
+  if (treeIdValue) {
+    card.dataset.treeId = treeIdValue;
+  }
+
+  const details = [
+    { label: 'Crown Diameter', value: crownDisplay },
+    { label: 'Canopy Area', value: areaDisplay },
+    { label: 'Family', value: family ?? '—' },
+  ];
+
+  const detailMarkup = details
+    .map(
+      (detail) => `
+        <div class="tree-card__detail">
+          <dt>${escapeHtml(detail.label)}</dt>
+          <dd>${escapeHtml(detail.value ?? '—')}</dd>
+        </div>
+      `
+    )
+    .join('');
+
+  card.innerHTML = `
+    <header class="tree-card__header">
+      <div>
+        <p class="tree-card__title">Tree ${escapeHtml(treeLabel)}</p>
+        <p class="tree-card__subtitle">
+          <span class="tree-card__species-swatch" style="background:${escapeHtml(speciesColor)};"></span>
+          ${escapeHtml(commonName)}
+          ${scientificMarkup}
+        </p>
+      </div>
+      ${statusMarkup}
+    </header>
+    <dl class="tree-card__details" role="presentation">
+      ${detailMarkup}
+    </dl>
+    <div class="tree-card__actions">
+      <button type="button" class="tree-card__action tree-card__action--secondary" data-tree-action="focus" data-tree-id="${escapeHtml(
+        treeIdValue
+      )}">Focus on Map</button>
+      <button type="button" class="tree-card__action tree-card__action--primary view-point-cloud-btn" data-tree-id="${escapeHtml(
+        treeIdValue
+      )}" data-species="${escapeHtml(commonName)}">Point Cloud</button>
+    </div>
+  `;
+
+  return card;
+}
+
+function renderResultsCards(data = filteredData) {
+  const container = document.getElementById('resultsCards');
+  if (!container) {
+    return;
+  }
+
+  container.setAttribute('aria-busy', 'true');
+  container.innerHTML = '';
+
+  if (!Array.isArray(data) || data.length === 0) {
+    container.innerHTML = '<p class="tree-card__empty">No trees to display.</p>';
+    container.setAttribute('aria-busy', 'false');
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  data.forEach((tree) => {
+    const card = buildTreeCard(tree);
+    if (card) {
+      fragment.appendChild(card);
+    }
+  });
+
+  container.appendChild(fragment);
+  container.setAttribute('aria-busy', 'false');
 }
 // --- Utility and Minor Functions ---
 

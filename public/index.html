@@ -38,28 +38,48 @@
         <!-- Map Container -->
         <div class="map-container">
             <div id="map"></div>
-            <div class="map-controls">
-                <!-- Legend -->
-                <div class="legend">
-                    <h4>Tree Status Legend</h4>
-                    <div class="legend-item">
-                        <div class="legend-color correct"></div>
-                        <span>Correctly Classified</span>
+            <div class="map-controls" id="mapControls" role="dialog" aria-modal="false" aria-labelledby="mapControlsTitle" aria-hidden="false" tabindex="-1">
+                <div class="map-controls__handle" aria-hidden="true"></div>
+                <div class="map-controls__header">
+                    <div>
+                        <p class="map-controls__title" id="mapControlsTitle">Map Tools</p>
+                        <p class="map-controls__subtitle">Legend, colors, and filters</p>
                     </div>
-                    <div class="legend-item">
-                        <div class="legend-color incorrect"></div>
-                        <span>Incorrectly Classified</span>
-                    </div>
-                    <div class="legend-item">
-                        <div class="legend-color training"></div>
-                        <span>Training Data</span>
+                    <div class="map-controls__header-actions">
+                        <button type="button" class="map-controls__collapse" id="mapControlsCollapse" aria-label="Hide map tools">
+                            -
+                        </button>
+                        <button type="button" class="map-controls__close" id="mapControlsClose" aria-label="Close map tools panel">
+                            ×
+                        </button>
                     </div>
                 </div>
 
-                <!-- Filter Controls -->
-                <div class="filter-controls">
-                    <h4>Filter Trees</h4>
-                    <!-- Display Mode Toggle -->
+                <section class="map-controls__section" aria-labelledby="legendSectionTitle">
+                    <div class="map-controls__section-title" id="legendSectionTitle">
+                        <span>Legend</span>
+                    </div>
+                    <div class="legend">
+                        <div class="legend-item">
+                            <div class="legend-color correct"></div>
+                            <span>Correctly Classified</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color incorrect"></div>
+                            <span>Incorrectly Classified</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color training"></div>
+                            <span>Training Data</span>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="map-controls__section" aria-labelledby="displaySectionTitle">
+                    <div class="map-controls__section-title" id="displaySectionTitle">
+                        <span>Display Mode</span>
+                    </div>
+                    <p class="map-controls__section-description">Switch between species colors and prediction accuracy.</p>
                     <div class="display-mode-toggle">
                         <label>Display Mode:</label>
                         <div class="toggle-switch-container" role="group" aria-label="Toggle between species and prediction coloring">
@@ -70,38 +90,50 @@
                             <span class="toggle-label" id="displayModePredictionsLabel">Predictions</span>
                         </div>
                     </div>
-                    
-                    <!-- Tree Filters -->
-                    <div id="speciesFilters">
-                        <label>
-                            <input type="checkbox" id="filterUnknownSpecies" checked aria-describedby="filterUnknownSpeciesHint" title="Toggle to include or hide trees without a known species label">
-                            Hide Unknown Species
-                        </label>
-                        <p id="filterUnknownSpeciesHint" class="sr-only">When checked, trees without a common name are hidden from the map and results table.</p>
-                    </div>
-                    
-                    <!-- Prediction Filters (initially hidden) -->
-                    <div id="predictionFilters" style="display: none;">
-                        <label>
-                            <input type="checkbox" id="filterCorrect" checked title="Display trees the model classified correctly" aria-label="Show correctly classified trees">
-                            Show Correct Predictions
-                        </label>
-                        <label>
-                            <input type="checkbox" id="filterIncorrect" checked title="Display trees the model classified incorrectly" aria-label="Show incorrectly classified trees">
-                            Show Incorrect Predictions
-                        </label>
-                        <label>
-                            <input type="checkbox" id="filterTraining" checked title="Display trees used for model training" aria-label="Show training trees">
-                            Show Training Trees
-                        </label>
-                        <div style="margin-top: 10px;">
-                            <button id="showGroupInfoBtn" style="padding: 5px 10px; background: #4CAF50; color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 12px; width: 100%;" aria-haspopup="dialog" aria-controls="groupInfoModal">
-                                View Tree Group Information
-                            </button>
+                </section>
+
+                <section class="map-controls__section" aria-labelledby="filtersSectionTitle">
+                    <div class="map-controls__section-title" id="filtersSectionTitle">
+                        <span>Filters</span>
+                        <div class="map-controls__section-actions">
+                            <button type="button" id="clearFiltersBtn" class="clear-filters-btn secondary" aria-label="Reset all map filters">Reset filters</button>
                         </div>
                     </div>
-                </div>
+                    <div class="filter-controls">
+                        <div id="speciesFilters">
+                            <label>
+                                <input type="checkbox" id="filterUnknownSpecies" checked aria-describedby="filterUnknownSpeciesHint" title="Toggle to include or hide trees without a known species label">
+                                Hide Unknown Species
+                            </label>
+                            <p id="filterUnknownSpeciesHint" class="sr-only">When checked, trees without a common name are hidden from the map and results table.</p>
+                        </div>
+                        
+                        <div id="predictionFilters" style="display: none;">
+                            <label>
+                                <input type="checkbox" id="filterCorrect" checked title="Display trees the model classified correctly" aria-label="Show correctly classified trees">
+                                Show Correct Predictions
+                            </label>
+                            <label>
+                                <input type="checkbox" id="filterIncorrect" checked title="Display trees the model classified incorrectly" aria-label="Show incorrectly classified trees">
+                                Show Incorrect Predictions
+                            </label>
+                            <label>
+                                <input type="checkbox" id="filterTraining" checked title="Display trees used for model training" aria-label="Show training trees">
+                                Show Training Trees
+                            </label>
+                            <div style="margin-top: 10px;">
+                                <button id="showGroupInfoBtn" style="padding: 5px 10px; background: #4CAF50; color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 12px; width: 100%;" aria-haspopup="dialog" aria-controls="groupInfoModal">
+                                    View Tree Group Information
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
             </div>
+            <button type="button" class="map-tools-fab" id="mapToolsFab" aria-label="Open map tools" aria-haspopup="dialog" aria-controls="mapControls" aria-expanded="false">
+                Map Tools
+            </button>
+            <div class="map-tools-scrim" id="mapToolsScrim" hidden></div>
         </div>
 
         <!-- Side Panel -->
@@ -203,6 +235,7 @@
                             </tbody>
                         </table>
                     </div>
+                    <div id="resultsCards" class="results-cards" aria-live="polite" aria-busy="false"></div>
                 </section>
 
                 <!-- Analysis Section -->
