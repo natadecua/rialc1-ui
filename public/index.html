@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>La Mesa Ecopark: LiDAR Tree Species Identification</title>
 
     <!-- External Libraries -->
@@ -136,12 +136,13 @@
             <div class="map-tools-scrim" id="mapToolsScrim" hidden></div>
         </div>
 
-        <!-- Side Panel -->
-        <div class="side-panel" id="sidePanel">
+        <!-- Side Panel Wrapper -->
+        <div class="side-panel-wrapper">
             <button type="button" class="panel-toggle" id="panelToggle" aria-expanded="true" aria-controls="sidePanel" title="Collapse or expand insights panel">
                 <span aria-hidden="true">◀</span>
                 <span class="sr-only">Toggle insights panel</span>
             </button>
+            <div class="side-panel" id="sidePanel">
             <div class="panel-content">
 
                 <!-- Performance Metrics Section -->
@@ -215,8 +216,21 @@
                 <!-- Results Section -->
                 <section class="results-section" aria-live="polite">
                     <h3>Tree Classification Results</h3>
-                    <div class="search-container">
-                        <input type="text" id="searchInput" placeholder="Search trees..." aria-label="Search trees by ID or species">
+                    <div class="search-header">
+                        <div class="search-header-left">
+                            <input type="text" id="searchInput" placeholder="Search trees..." aria-label="Search trees by ID or species" style="flex: 1; min-width: 0;">
+                            <span id="resultsCounter" class="results-counter" style="display: none;">
+                                <span class="results-counter-highlight" id="resultsCount">0</span> results
+                            </span>
+                        </div>
+                        <button type="button" id="exportCsvBtn" class="export-btn" title="Export current results to CSV">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                <polyline points="7 10 12 15 17 10"></polyline>
+                                <line x1="12" y1="15" x2="12" y2="3"></line>
+                            </svg>
+                            Export CSV
+                        </button>
                     </div>
                     <div class="table-container">
                         <table id="resultsTable">
@@ -254,7 +268,7 @@
                 </section>
             </div>
         </div>
-    </div>
+    </div> <!-- Close side-panel-wrapper -->
     </main>
 
     <!-- Loading Indicator -->

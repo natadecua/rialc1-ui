@@ -41,7 +41,7 @@ const SHAPEFILE_CANDIDATES = [
   //'/raw_data/crown_shp/mcws_crowns.shp'
 ];
 
-const POINTCLOUD_METADATA_URL = '/raw_data/merged_recropped/metadata.json';
+const POINTCLOUD_METADATA_URL = '/raw_data/merged_recropped_brotli/metadata.json';
 
 const potreeState = {
   viewer: null,
@@ -569,7 +569,8 @@ async function initializePotreeViewer() {
 
     viewer.setFOV(60);
     viewer.setEDLEnabled(true);
-    viewer.setPointBudget(3_000_000);
+    // Reduced point budget to improve stability over tunnel connections
+    viewer.setPointBudget(1_500_000);
     viewer.loadSettingsFromURL();
     viewer.setDescription('La Mesa Ecopark · Tree classification results overlayed on LiDAR point cloud');
 

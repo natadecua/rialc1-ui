@@ -1290,6 +1290,9 @@ document.addEventListener('DOMContentLoaded', async function () {
     refreshDataViews({ preserveSelection: true });
   }
   console.log(`Loaded ${predictionData.length} prediction records`);
+  
+  // Initialize Phase 1 features
+  initializePhase1Features();
   if (predictionMetrics && Object.keys(predictionMetrics).length > 0) {
     console.log('Loaded prediction metrics:', predictionMetrics);
   }
@@ -1349,7 +1352,13 @@ function initializeMap() {
     maxZoom: 20,
     noWrap: true,
     preferCanvas: true,
+    zoomControl: false, // Disable default zoom control to move it
   });
+
+  // Add zoom control to top-right to avoid overlap with map tools
+  L.control.zoom({
+    position: 'topright'
+  }).addTo(map);
 
   // Base layers - NOT added by default to save requests
   const osmBase = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -1812,6 +1821,13 @@ function setupEventListeners() {
 
     panelToggle.addEventListener('click', () => {
       const collapsed = sidePanel.classList.toggle('collapsed');
+      
+      // Toggle class on container to adjust grid layout
+      const container = document.querySelector('.container');
+      if (container) {
+        container.classList.toggle('sidebar-collapsed', collapsed);
+      }
+
       updatePanelState(collapsed);
       setTimeout(() => {
         map.invalidateSize({ animate: true });
@@ -2145,31 +2161,36 @@ function addTreesToMap(data = filteredData) {
 
       // Get the appropriate color for this species, passing tree ID for prediction mode
       const speciesColor = getSpeciesColor(species, feature.properties.tree_id);
+      
+      // Check if this tree is selected
+      const treeId = (feature.properties.tree_id ?? feature.properties.id ?? feature.properties.FID)?.toString();
+      const isSelected = selectedTreeId && treeId === selectedTreeId;
 
       // Apply different styles based on geometry type
       if (feature.geometry.type.includes('Polygon')) {
         return {
-          color: speciesColor,
-          weight: 2,
-          opacity: 0.8,
+          color: isSelected ? '#2563eb' : speciesColor,
+          weight: isSelected ? 5 : 2,
+          opacity: isSelected ? 1 : 0.8,
           fillColor: speciesColor,
-          fillOpacity: 0.5,
+          fillOpacity: isSelected ? 0.7 : 0.5,
+          className: isSelected ? 'selected-polygon' : '',
         };
       } else if (feature.geometry.type.includes('LineString')) {
         return {
-          color: '#0000ff', // Blue for lines
-          weight: 3,
+          color: isSelected ? '#2563eb' : '#0000ff', // Blue for lines
+          weight: isSelected ? 5 : 3,
           opacity: 1.0,
           dashArray: '5, 10', // Dashed line for better visibility
         };
       } else {
         return {
-          color: speciesColor,
-          weight: 4,
+          color: isSelected ? '#2563eb' : speciesColor,
+          weight: isSelected ? 6 : 4,
           opacity: 1.0,
-          radius: 8,
+          radius: isSelected ? 10 : 8,
           fillColor: speciesColor,
-          fillOpacity: 0.7,
+          fillOpacity: isSelected ? 0.9 : 0.7,
         };
       }
     },
@@ -2212,6 +2233,8 @@ function addTreesToMap(data = filteredData) {
       if (planarArea !== null && planarArea > 0) {
         areaSqMeters = planarArea;
         props.planar_canopy_area_m2 = planarArea;
+      } else {
+        delete props.planar_canopy_area_m2;
       }
 
       if (
@@ -2385,7 +2408,29 @@ function addTreesToMap(data = filteredData) {
           return;
         }
 
+        const previousSelectedId = selectedTreeId;
         selectedTreeId = treeId;
+        
+        // Update styles for previous and new selection
+        if (previousSelectedId && treeLayerIndex.has(previousSelectedId)) {
+          const prevLayer = treeLayerIndex.get(previousSelectedId);
+          prevLayer.setStyle({
+            color: getSpeciesColor(prevLayer.feature.properties.Cmmn_Nm || 'Unknown', previousSelectedId),
+            weight: 2,
+            opacity: 0.8,
+            fillOpacity: 0.5,
+          });
+        }
+        
+        // Highlight the newly selected tree
+        layer.setStyle({
+          color: '#2563eb',
+          weight: 5,
+          opacity: 1,
+          fillOpacity: 0.7,
+        });
+        layer.bringToFront();
+        
         highlightSelectedRow();
         focusTreeOnMap(treeId, { openPopup: true, fitBounds: false });
       });
@@ -2449,8 +2494,17 @@ function populateResultsTable() {
 
   const columnCount = tableHeaders.querySelectorAll('th').length;
 
+  // Update results counter
+  updateResultsCounter();
+  
+  // Update export button state
+  const exportBtn = document.getElementById('exportCsvBtn');
+  if (exportBtn) {
+    exportBtn.disabled = filteredData.length === 0;
+  }
+
   if (filteredData.length === 0) {
-    tableBody.innerHTML = `<tr><td colspan="${columnCount}">No trees to display.</td></tr>`;
+    showEmptyState();
     return;
   }
 
@@ -2715,7 +2769,7 @@ function renderResultsCards(data = filteredData) {
 }
 // --- Utility and Minor Functions ---
 
-function filterTableData(searchTerm) {
+function filterTableData(searchTerm = '') {
   currentSearchTerm = searchTerm ?? '';
   refreshDataViews({ preserveSelection: true });
 }
@@ -3091,4 +3145,206 @@ function updateShapefileStatus(icon, message) {
 function updateRasterStatus(icon, message) {
   document.getElementById('rasterStatus').innerHTML =
     `<span style="margin-right: 8px;">${icon}</span><span>${message}</span>`;
+}
+
+// ============================================================================
+// PHASE 1 IMPROVEMENTS: Loading States, Results Counter, Export, Empty States
+// ============================================================================
+
+/**
+ * Initialize Phase 1 features
+ */
+function initializePhase1Features() {
+  setupResultsCounter();
+  setupExportButton();
+  updateResultsCounter();
+}
+
+/**
+ * Display skeleton loaders while data is loading
+ */
+function showSkeletonLoader() {
+  const tableBody = document.getElementById('tableBody');
+  if (!tableBody) return;
+  
+  const skeletonHTML = Array.from({ length: 5 }, () => `
+    <tr class="skeleton-row">
+      <td><div class="skeleton-loader skeleton-cell" style="width: 60px;"></div></td>
+      <td><div class="skeleton-loader skeleton-cell" style="width: 120px;"></div></td>
+      <td><div class="skeleton-loader skeleton-cell" style="width: 150px;"></div></td>
+      <td><div class="skeleton-loader skeleton-cell" style="width: 100px;"></div></td>
+      <td><div class="skeleton-loader skeleton-cell" style="width: 80px;"></div></td>
+    </tr>
+  `).join('');
+  
+  tableBody.innerHTML = skeletonHTML;
+}
+
+/**
+ * Setup results counter to show filtered results
+ */
+function setupResultsCounter() {
+  const counter = document.getElementById('resultsCounter');
+  const countDisplay = document.getElementById('resultsCount');
+  
+  if (!counter || !countDisplay) return;
+  
+  // Show counter when there are results
+  if (filteredData && filteredData.length > 0) {
+    countDisplay.textContent = filteredData.length;
+    counter.style.display = 'inline-flex';
+  }
+}
+
+/**
+ * Update the results counter dynamically
+ */
+function updateResultsCounter() {
+  const counter = document.getElementById('resultsCounter');
+  const countDisplay = document.getElementById('resultsCount');
+  
+  if (!counter || !countDisplay) return;
+  
+  if (filteredData && filteredData.length > 0) {
+    countDisplay.textContent = filteredData.length;
+    counter.style.display = 'inline-flex';
+  } else {
+    counter.style.display = 'none';
+  }
+}
+
+/**
+ * Setup CSV export functionality
+ */
+function setupExportButton() {
+  const exportBtn = document.getElementById('exportCsvBtn');
+  if (!exportBtn) return;
+  
+  exportBtn.addEventListener('click', exportToCSV);
+  
+  // Disable if no data
+  if (!filteredData || filteredData.length === 0) {
+    exportBtn.disabled = true;
+  }
+}
+
+/**
+ * Export current filtered data to CSV
+ */
+function exportToCSV() {
+  if (!filteredData || filteredData.length === 0) {
+    alert('No data to export');
+    return;
+  }
+  
+  const exportBtn = document.getElementById('exportCsvBtn');
+  if (exportBtn) {
+    exportBtn.disabled = true;
+    exportBtn.textContent = 'Exporting...';
+  }
+  
+  try {
+    let csvContent = '';
+    
+    if (isPredictionMode) {
+      // Prediction mode CSV
+      csvContent = 'Tree ID,Actual Species,Predicted Species,Status,Crown Diameter (m)\n';
+      
+      filteredData.forEach(tree => {
+        const props = tree.properties;
+        const treeId = props.tree_id || '';
+        const treeData = getPredictionForTree(treeId.toString());
+        
+        if (treeData) {
+          const crownDiameter = coalesceProperty(props, ['crown_diameter_m', 'specs_d', 'specis_d']) || '';
+          const actual = escapeCsvValue(treeData.actual || '');
+          const predicted = treeData.isTraining ? 'N/A' : escapeCsvValue(treeData.predicted || '');
+          const status = treeData.isTraining ? 'TRAINING' : (treeData.correct ? 'CORRECT' : 'INCORRECT');
+          
+          csvContent += `${treeId},${actual},${predicted},${status},${crownDiameter}\n`;
+        }
+      });
+    } else {
+      // Species mode CSV
+      csvContent = 'Tree ID,Common Name,Scientific Name,Family,Crown Diameter (m)\n';
+      
+      filteredData.forEach(tree => {
+        const props = tree.properties;
+        const treeId = props.tree_id || '';
+        const commonName = escapeCsvValue(props.Cmmn_Nm || props.cmmn_nm || 'Unknown');
+        const scientificName = escapeCsvValue(props.Scntf_N || props.scntf_n || '');
+        const family = escapeCsvValue(props.Family || props.family || '');
+        const crownDiameter = coalesceProperty(props, ['crown_diameter_m', 'specs_d', 'specis_d']) || '';
+        
+        csvContent += `${treeId},${commonName},${scientificName},${family},${crownDiameter}\n`;
+      });
+    }
+    
+    // Create download
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
+    
+    link.setAttribute('href', url);
+    link.setAttribute('download', `lamesa-trees-${timestamp}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
+    console.log(`Exported ${filteredData.length} trees to CSV`);
+  } catch (error) {
+    console.error('Error exporting CSV:', error);
+    alert('Failed to export CSV. Please try again.');
+  } finally {
+    if (exportBtn) {
+      exportBtn.disabled = false;
+      exportBtn.innerHTML = `
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+          <polyline points="7 10 12 15 17 10"></polyline>
+          <line x1="12" y1="15" x2="12" y2="3"></line>
+        </svg>
+        Export CSV
+      `;
+    }
+  }
+}
+
+/**
+ * Escape CSV values to handle commas and quotes
+ */
+function escapeCsvValue(value) {
+  if (value === null || value === undefined) return '';
+  const stringValue = String(value);
+  if (stringValue.includes(',') || stringValue.includes('"') || stringValue.includes('\n')) {
+    return `"${stringValue.replace(/"/g, '""')}"`;
+  }
+  return stringValue;
+}
+
+/**
+ * Show empty state when no results found
+ */
+function showEmptyState(message = 'No trees found', description = 'Try adjusting your filters or search terms') {
+  const tableBody = document.getElementById('tableBody');
+  if (!tableBody) return;
+  
+  const columnCount = document.querySelectorAll('#resultsTable thead th').length;
+  
+  tableBody.innerHTML = `
+    <tr>
+      <td colspan="${columnCount}" style="padding: 0; border: none;">
+        <div class="empty-state">
+          <div class="empty-state-icon">🌳</div>
+          <div class="empty-state-title">${escapeHtml(message)}</div>
+          <div class="empty-state-description">${escapeHtml(description)}</div>
+          <button class="empty-state-action" onclick="document.getElementById('clearFiltersBtn').click();">
+            Clear All Filters
+          </button>
+        </div>
+      </td>
+    </tr>
+  `;
 }

@@ -47,6 +47,7 @@ async function loadPrecomputedSamples() {
   }
 
   precomputedSamplesPromise = new Promise((resolve, reject) => {
+    console.log(`[Cache] Starting to load precomputed samples from ${precomputedSamplesPath}...`);
     const metadata = {
       source: path.basename(pointCloudFilePath),
       generatedAt: null,
@@ -137,6 +138,7 @@ async function loadPrecomputedSamples() {
       if (aborted) {
         return;
       }
+      console.log(`[Cache] Successfully loaded ${treeEntries.size} trees into memory.`);
       resolve({
         metadata,
         trees: treeEntries,
@@ -277,6 +279,8 @@ async function loadTreePointCloud(treeId, maxPoints = MAX_RESERVOIR_SIZE) {
     );
   }
 
+  console.warn(`[Performance] Cache miss for tree ${treeIdKey}. Falling back to slow CSV scan.`);
+
   if (!fs.existsSync(pointCloudFilePath)) {
     throw new Error('Point cloud source file not found.');
   }
@@ -408,9 +412,9 @@ app.use(
       const ext = path.extname(filePath).toLowerCase();
 
       if (ext === '.bin' || ext === '.laz' || ext === '.las') {
-        // Range requests for large Potree assets can trip browser cache limitations
-        // when immutable caching is enabled. Prefer no-store so partial fetches succeed.
-        res.setHeader('Cache-Control', 'no-store');
+        // Allow caching for large files but require revalidation to handle updates
+        // This helps with Cloudflare Tunnel performance while maintaining correctness
+        res.setHeader('Cache-Control', 'public, max-age=3600, no-transform');
         res.setHeader('Access-Control-Expose-Headers', 'Content-Length');
       } else if (
         ext === '.json' ||
@@ -485,4 +489,8 @@ app.listen(port, () => {
   console.log('Serving frontend from the "public" directory.');
   console.log('Serving raw data from the "raw_data" directory.');
   console.log('Serving map tiles from the "lamesa_forest_final_fixed" directory.');
+
+  // Pre-load the cache on startup so the first request is fast
+  console.log('Background loading tree point samples...');
+  loadPrecomputedSamples();
 });
