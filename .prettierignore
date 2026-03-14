@@ -1,0 +1,7 @@
+node_modules/
+potree_converter/
+Potree_1.8.2/
+lamesa_forest_final_fixed/
+raw_data/
+**/*.las
+**/*.laz

@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>La Mesa Ecopark: LiDAR Tree Species Identification</title>
+
+    <!-- External Libraries -->
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+    <!-- All JavaScript libraries MUST be in the <head> and in this order -->
+    <!-- 1. Leaflet Core -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- 2. Proj4 for defining projections -->
+    <script src="https://unpkg.com/proj4@2.11.0/dist/proj4.js"></script>
+    <!-- 3. Proj4Leaflet to integrate Proj4 with Leaflet -->
+    <script src="https://unpkg.com/proj4leaflet@1.0.2/src/proj4leaflet.js"></script>
+    <!-- 4. Shapefile.js to read shapefiles -->
+    <script src="https://unpkg.com/shapefile@0.6.6/dist/shapefile.js"></script>
+    <!-- 5. GeometryUtil for area calculations -->
+    <script src="https://unpkg.com/leaflet-geometryutil@0.10.0/src/leaflet.geometryutil.js"></script>
+
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Header -->
+    <header class="header" role="banner">
+        <h1>La Mesa Ecopark: LiDAR Tree Species Identification</h1>
+        <div class="header-links">
+            <a href="/view_lamesa.html" id="openPotreeBtn" class="view-3d-btn view-3d-btn--secondary open-3d-viewer" target="_blank" rel="noopener" title="Open the inline 3D viewer with tree crowns and overlays">Open 3D Tree Viewer</a>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="container" role="main">
+        <!-- Map Container -->
+        <div class="map-container">
+            <div id="map"></div>
+            <div class="map-controls" id="mapControls" role="dialog" aria-modal="false" aria-labelledby="mapControlsTitle" aria-hidden="false" tabindex="-1">
+                <div class="map-controls__handle" aria-hidden="true"></div>
+                <div class="map-controls__header">
+                    <div>
+                        <p class="map-controls__title" id="mapControlsTitle">Map Tools</p>
+                        <p class="map-controls__subtitle">Legend, colors, and filters</p>
+                    </div>
+                    <div class="map-controls__header-actions">
+                        <button type="button" class="map-controls__collapse" id="mapControlsCollapse" aria-label="Hide map tools">
+                            -
+                        </button>
+                        <button type="button" class="map-controls__close" id="mapControlsClose" aria-label="Close map tools panel">
+                            ×
+                        </button>
+                    </div>
+                </div>
+
+                <section class="map-controls__section" aria-labelledby="legendSectionTitle">
+                    <div class="map-controls__section-title" id="legendSectionTitle">
+                        <span>Legend</span>
+                    </div>
+                    <div class="legend">
+                        <div class="legend-item">
+                            <div class="legend-color correct"></div>
+                            <span>Correctly Classified</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color incorrect"></div>
+                            <span>Incorrectly Classified</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color training"></div>
+                            <span>Training Data</span>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="map-controls__section" aria-labelledby="displaySectionTitle">
+                    <div class="map-controls__section-title" id="displaySectionTitle">
+                        <span>Display Mode</span>
+                    </div>
+                    <p class="map-controls__section-description">Switch between species colors and prediction accuracy.</p>
+                    <div class="display-mode-toggle">
+                        <label>Display Mode:</label>
+                        <div class="toggle-switch-container" role="group" aria-label="Toggle between species and prediction coloring">
+                            <span class="toggle-label" id="displayModeSpeciesLabel">Species</span>
+                            <button type="button" id="predictionModeToggle" class="toggle-switch-btn" role="switch" aria-checked="false" aria-labelledby="displayModeSpeciesLabel displayModePredictionsLabel" data-tooltip="Switch to highlight model predictions" data-tooltip-position="top">
+                                <span class="toggle-slider" aria-hidden="true"></span>
+                            </button>
+                            <span class="toggle-label" id="displayModePredictionsLabel">Predictions</span>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="map-controls__section" aria-labelledby="filtersSectionTitle">
+                    <div class="map-controls__section-title" id="filtersSectionTitle">
+                        <span>Filters</span>
+                        <div class="map-controls__section-actions">
+                            <button type="button" id="clearFiltersBtn" class="clear-filters-btn secondary" aria-label="Reset all map filters">Reset filters</button>
+                        </div>
+                    </div>
+                    <div class="filter-controls">
+                        <div id="speciesFilters">
+                            <label>
+                                <input type="checkbox" id="filterUnknownSpecies" checked aria-describedby="filterUnknownSpeciesHint" title="Toggle to include or hide trees without a known species label">
+                                Hide Unknown Species
+                            </label>
+                            <p id="filterUnknownSpeciesHint" class="sr-only">When checked, trees without a common name are hidden from the map and results table.</p>
+                        </div>
+                        
+                        <div id="predictionFilters" style="display: none;">
+                            <label>
+                                <input type="checkbox" id="filterCorrect" checked title="Display trees the model classified correctly" aria-label="Show correctly classified trees">
+                                Show Correct Predictions
+                            </label>
+                            <label>
+                                <input type="checkbox" id="filterIncorrect" checked title="Display trees the model classified incorrectly" aria-label="Show incorrectly classified trees">
+                                Show Incorrect Predictions
+                            </label>
+                            <label>
+                                <input type="checkbox" id="filterTraining" checked title="Display trees used for model training" aria-label="Show training trees">
+                                Show Training Trees
+                            </label>
+                            <div style="margin-top: 10px;">
+                                <button id="showGroupInfoBtn" style="padding: 5px 10px; background: #4CAF50; color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 12px; width: 100%;" aria-haspopup="dialog" aria-controls="groupInfoModal">
+                                    View Tree Group Information
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+            <button type="button" class="map-tools-fab" id="mapToolsFab" aria-label="Open map tools" aria-haspopup="dialog" aria-controls="mapControls" aria-expanded="false">
+                Map Tools
+            </button>
+            <div class="map-tools-scrim" id="mapToolsScrim" hidden></div>
+        </div>
+
+        <!-- Side Panel Wrapper -->
+        <div class="side-panel-wrapper">
+            <button type="button" class="panel-toggle" id="panelToggle" aria-expanded="true" aria-controls="sidePanel" title="Collapse or expand insights panel">
+                <span aria-hidden="true">◀</span>
+                <span class="sr-only">Toggle insights panel</span>
+            </button>
+            <div class="side-panel" id="sidePanel">
+            <div class="panel-content">
+
+                <!-- Performance Metrics Section -->
+                <section class="performance-section">
+                    <h3>Model Performance</h3>
+                    <div class="metrics-grid">
+                        <div class="metric">
+                            <span class="metric-label">Overall Accuracy</span>
+                            <span class="metric-value" id="modelOverallAccuracy">-</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Mean Class Accuracy</span>
+                            <span class="metric-value" id="modelMacroAccuracy">-</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">F1 Score</span>
+                            <span class="metric-value">85.73%</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Cohen's Kappa</span>
+                            <span class="metric-value">0.8157</span>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="dataset-section">
+                    <h3>Tree Dataset Overview</h3>
+                    <div class="metrics-grid metrics-grid--compact">
+                        <div class="metric">
+                            <span class="metric-label">Total Trees</span>
+                            <span class="metric-value" id="datasetTotalTrees">-</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Species Types</span>
+                            <span class="metric-value" id="datasetSpeciesTypes">-</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Avg. Crown Diameter</span>
+                            <span class="metric-value" id="datasetAvgCrown">-</span>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Data Status Section -->
+                <section class="status-section">
+                    <h3>Data Status</h3>
+                    <div class="status-item">
+                        <div id="shapefileStatus" role="status" aria-live="polite">⏳ Loading shapefiles...</div>
+                    </div>
+                    <div class="status-item">
+                        <div id="rasterStatus" role="status" aria-live="polite">✔️ Raster served from backend</div>
+                    </div>
+                    <div class="status-item">
+                        <div id="dataStatus" role="status" aria-live="polite">Initializing...</div>
+                    </div>
+                </section>
+
+                <!-- File Loading Section -->
+                 
+
+                <section class="file-loading-section" style="visibility: hidden;">
+                    <h3>Load Data</h3>
+                    <button id="loadLocalShapefileBtn" class="load-btn">
+                        📁 Load Local Shapefiles
+                    </button>
+                    <!-- The GeoTIFF button is now removed as it's handled by the backend -->
+                </section>
+            
+
+
+                <!-- Results Section -->
+                <section class="results-section" aria-live="polite">
+                    <h3>Tree Classification Results</h3>
+                    <div class="search-header">
+                        <div class="search-header-left">
+                            <input type="text" id="searchInput" placeholder="Search trees..." aria-label="Search trees by ID or species" style="flex: 1; min-width: 0;">
+                            <span id="resultsCounter" class="results-counter" style="display: none;">
+                                <span class="results-counter-highlight" id="resultsCount">0</span> results
+                            </span>
+                        </div>
+                        <button type="button" id="exportCsvBtn" class="export-btn" title="Export current results to CSV">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                <polyline points="7 10 12 15 17 10"></polyline>
+                                <line x1="12" y1="15" x2="12" y2="3"></line>
+                            </svg>
+                            Export CSV
+                        </button>
+                    </div>
+                    <div class="table-container">
+                        <table id="resultsTable">
+                            <thead>
+                                <tr>
+                                    <th data-sort="tree_id">Tree ID</th>
+                                    <th data-sort="Cmmn_Nm">Common Name</th>
+                                    <th data-sort="Scntf_N">Scientific Name</th>
+                                    <th data-sort="Family">Family</th>
+                                    <th data-sort="crown_diameter_m">Crown Diameter (m)</th>
+                                    <th data-sort="area">Area (m²)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tableBody">
+                                <!-- Table rows will be populated by JavaScript -->
+                            </tbody>
+                        </table>
+                    </div>
+                    <div id="resultsCards" class="results-cards" aria-live="polite" aria-busy="false"></div>
+                </section>
+
+                <!-- Analysis Section -->
+                <section class="analysis-section">
+                    <h3>Confusion Matrix</h3>
+                    <div id="confusionMatrix" class="cm-container">
+                        <!-- Confusion matrix will be populated by JavaScript -->
+                    </div>
+                </section>
+
+                <section class="analysis-section" style="visibility: collapse;">
+                    <h3>Per-Class Metrics</h3>
+                    <div id="perClassMetrics" class="pcm-container">
+                        <!-- Per-class metrics will be populated by JavaScript -->
+                    </div>
+                </section>
+            </div>
+        </div>
+    </div> <!-- Close side-panel-wrapper -->
+    </main>
+
+    <!-- Loading Indicator -->
+    <div id="loadingIndicator" class="loading">
+        <div class="spinner"></div>
+        <p>Loading La Mesa Ecopark data...</p>
+    </div>
+    
+    <!-- Tree Group Information Modal -->
+    <div id="groupInfoModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="groupInfoModalTitle" aria-describedby="groupInfoModalDescription" tabindex="-1" aria-hidden="true">
+        <div class="modal-content group-modal" role="document">
+            <header class="modal-header">
+                <h2 id="groupInfoModalTitle">Tree Group Information</h2>
+                <button type="button" id="closeGroupModal" class="modal-close" aria-label="Close tree group information">&times;</button>
+            </header>
+            <div class="modal-body" id="groupInfoModalDescription">
+                <p>Trees in the La Mesa Eco Park were classified into five (5) groups representing the top 5 most common tree species in the park:</p>
+
+                <section>
+                    <h3>Group 1: Most Common Species</h3>
+                    <p>The most frequently occurring tree species in La Mesa Eco Park.</p>
+                </section>
+
+                <section>
+                    <h3>Group 2: Second Most Common Species</h3>
+                    <p>The second most frequently occurring tree species.</p>
+                </section>
+
+                <section>
+                    <h3>Group 3: Third Most Common Species</h3>
+                    <p>The third most frequently occurring tree species.</p>
+                </section>
+
+                <section>
+                    <h3>Group 4: Fourth Most Common Species</h3>
+                    <p>The fourth most frequently occurring tree species.</p>
+                </section>
+
+                <section>
+                    <h3>Group 5: Fifth Most Common Species</h3>
+                    <p>The fifth most frequently occurring tree species.</p>
+                </section>
+                
+                <p style="margin-top: 20px; font-style: italic; color: #666;">
+                    Note: These groups are based on frequency of occurrence rather than taxonomic classification.
+                </p>
+            </div>
+            <footer class="modal-footer">
+                <button id="closeModalBtn" class="modal-primary-btn" type="button">Close</button>
+            </footer>
+        </div>
+    </div>
+
+    <!-- Point Cloud Viewer Modal -->
+    <div id="pointCloudModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="pointCloudModalTitle" aria-describedby="pointCloudStatus" tabindex="-1" aria-hidden="true">
+        <div class="modal-content pointcloud-modal" role="document">
+            <header class="modal-header">
+                <h2 id="pointCloudModalTitle">Tree Point Cloud</h2>
+                <button type="button" id="pointCloudCloseBtn" class="modal-close" aria-label="Close point cloud viewer">&times;</button>
+            </header>
+            <div class="modal-body">
+                <div id="pointCloudViewer" class="pointcloud-viewer" role="presentation">
+                    <canvas id="pointCloudCanvas" class="pointcloud-canvas" aria-hidden="true"></canvas>
+                    <div id="pointCloudStatus" class="pointcloud-status" role="status" aria-live="polite">Select a tree to view its 3D point cloud.</div>
+                </div>
+            </div>
+            <footer class="modal-footer">
+                <button id="pointCloudDismissBtn" class="modal-primary-btn" type="button">Close</button>
+            </footer>
+        </div>
+    </div>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "/vendor/three/three.module.js",
+                "three/examples/jsm/": "/vendor/three/examples/jsm/"
+            }
+        }
+    </script>
+    <script type="module" src="script.js"></script>
+    <script src="js/potree-launcher.js"></script>
+</body>
+</html>

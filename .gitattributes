@@ -1,0 +1,7 @@
+lamesa_forest_final_fixed/**/*.png filter=lfs diff=lfs merge=lfs -text
+raw_data/tree_point_samples.json filter=lfs diff=lfs merge=lfs -text
+raw_data/**/*.bin filter=lfs diff=lfs merge=lfs -text
+raw_data/**/*.las filter=lfs diff=lfs merge=lfs -text
+raw_data/**/*.laz filter=lfs diff=lfs merge=lfs -text
+raw_data/**/*.tif filter=lfs diff=lfs merge=lfs -text
+raw_data/**/*.tiff filter=lfs diff=lfs merge=lfs -text

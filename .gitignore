@@ -1,0 +1,13 @@
+# Dependency folders
+node_modules/
+
+# OS/editor artifacts
+.DS_Store
+Thumbs.db
+
+# Keep full production data in repo via Git LFS.
+# Do not ignore raw_data or tile binaries here.
+
+# GitHub hard limit workaround: source CSVs exceed GitHub/LFS per-file limits.
+raw_data/dalponte2016_newer.csv
+raw_data/newgroups_adjusted_all_v3.csv
