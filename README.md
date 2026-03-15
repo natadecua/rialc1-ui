@@ -10,21 +10,102 @@ Interactive thesis web application for exploring tree species classification out
 
 ## Table of Contents
 
-1. [System Overview](#system-overview)
-2. [Architecture](#architecture)
-3. [Tech Stack](#tech-stack)
-4. [Repository Layout](#repository-layout)
-5. [Data Assets and Requirements](#data-assets-and-requirements)
-6. [GitHub + Large File Strategy](#github--large-file-strategy)
-7. [Quick Start](#quick-start)
-8. [Run and Validate](#run-and-validate)
-9. [API Reference](#api-reference)
-10. [Point Cache Build Workflow](#point-cache-build-workflow)
-11. [Development Commands](#development-commands)
-12. [Cloudflare Tunnel (Remote Testing)](#cloudflare-tunnel-remote-testing)
-13. [Performance Notes](#performance-notes)
-14. [Troubleshooting](#troubleshooting)
-15. [Known Limitations](#known-limitations)
+1. [Portfolio Summary](#portfolio-summary)
+2. [Thesis Context](#thesis-context)
+3. [My Role and Ownership](#my-role-and-ownership)
+4. [Key Achievements](#key-achievements)
+5. [Screenshots (Project Showcase)](#screenshots-project-showcase)
+6. [System Overview](#system-overview)
+7. [Architecture](#architecture)
+8. [Tech Stack](#tech-stack)
+9. [Repository Layout](#repository-layout)
+10. [Data Assets and Requirements](#data-assets-and-requirements)
+11. [GitHub + Large File Strategy](#github--large-file-strategy)
+12. [Quick Start](#quick-start)
+13. [Run and Validate](#run-and-validate)
+14. [API Reference](#api-reference)
+15. [Point Cache Build Workflow](#point-cache-build-workflow)
+16. [Development Commands](#development-commands)
+17. [Cloudflare Tunnel (Remote Testing)](#cloudflare-tunnel-remote-testing)
+18. [Performance Notes](#performance-notes)
+19. [Troubleshooting](#troubleshooting)
+20. [Known Limitations](#known-limitations)
+
+---
+
+## Portfolio Summary
+
+This project is an end-to-end geospatial and machine-learning visualization system I built for my thesis. It transforms large LiDAR-derived tree datasets into an interactive web product that supports model validation, spatial analysis, and communication of results to both technical and non-technical audiences.
+
+For employers, this project demonstrates my ability to:
+
+- build full-stack systems from research requirements to deployable software
+- handle large geospatial data under real storage and bandwidth constraints
+- design for performance, maintainability, and clear user workflows
+- translate academic work into practical decision-support tools
+
+---
+
+## Thesis Context
+
+### Problem
+
+Tree-species classification outputs from LiDAR pipelines are difficult to evaluate using static outputs alone. Users need spatial context, model prediction visibility, and tree-level 3D drill-down in one workflow.
+
+### Objective
+
+Design and implement a web application that enables users to:
+
+1. explore crown polygons and prediction layers in 2D,
+2. inspect point-cloud structure in 3D,
+3. retrieve tree-level points quickly without loading massive raw files directly in the browser,
+4. support repeatable analysis for thesis validation and presentation.
+
+### Outcome
+
+I delivered a working thesis UI that combines Leaflet, Potree, and a custom Express API with reservoir sampling and cache preloading. The system provides practical performance on large datasets and supports both research review and demonstration use cases.
+
+---
+
+## My Role and Ownership
+
+I led implementation across data, backend, frontend, and operations:
+
+- **System architecture:** route/data design, static serving strategy, and integration flow
+- **Backend engineering:** point-cloud API with cache-first loading and CSV fallback behavior
+- **Data engineering:** streaming cache builder for very large source CSV files
+- **Frontend engineering:** interactive 2D/3D workflows and tree-level inspection UX
+- **Repository operations:** Git/LFS large-file strategy and maintainable documentation
+
+---
+
+## Key Achievements
+
+- Built a browser-based geospatial thesis product on real-world, high-volume assets.
+- Implemented efficient per-tree point retrieval using reservoir sampling.
+- Added precomputed NDJSON cache loading for faster repeated tree queries.
+- Tuned static asset delivery and caching behavior for map tiles and point-cloud binaries.
+- Created a reproducible workflow for dataset updates and cache regeneration.
+
+---
+
+## Screenshots (Project Showcase)
+
+### 1) Main 2D map interface
+
+![Main 2D map interface](docs/screenshots/01-map-overview.png)
+
+### 2) Potree main scene viewer
+
+![Potree main viewer](docs/screenshots/02-potree-main.png)
+
+### 3) Alternate Potree workflow
+
+![Potree alternate viewer](docs/screenshots/03-potree-alt-viewer.png)
+
+### 4) Per-tree point cloud viewer
+
+![Per-tree point cloud viewer](docs/screenshots/04-tree-point-viewer.png)
 
 ---
 
